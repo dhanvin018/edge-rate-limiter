@@ -9,7 +9,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+
+import static java.util.Objects.isNull;
 
 public class DimensionLimiter {
 
@@ -38,33 +41,49 @@ public class DimensionLimiter {
             return RateLimitDecision.allow();
         }
 
+        if (dimension == Dimension.IP_ADDRESS && context.ipAddress() == null) {
+            log.debug("Skipping IP_ADDRESS dimension rate limit check due to missing IP address");
+            return RateLimitDecision.allow();
+        }
+
         List<WindowRule> rules = rateLimiterConfigProvider.rulesFor(context.userTier(), dimension);
+        if (isNull(rules) || rules.isEmpty()) {
+            log.debug("No rules found for dimension {}", dimension);
+            return RateLimitDecision.allow();
+        }
+
         String identity = resolveKey(dimension, context);
+        log.debug("Rule count found for dimension {} : {}", dimension, rules.size());
+
+        List<RateLimitCommitItem> commitItems = new ArrayList<>();
 
         for (WindowRule rule : rules) {
-            String ruleId = dimension + ":" + rule.windowSize() + ":" + rule.effectiveCapacity();
+            String ruleId = dimension + ":" + rule.strategyType() + ":" + rule.windowSize() + ":" + rule.effectiveCapacity();
 
             if (context.cost() > rule.effectiveCapacity()) {
-                log.debug("Request cost ({}) exceeds rule effective capacity ({}) for rule: {}",
+                log.debug("Request cost ({}) exceeds rule capacity ({}) for rule: {}",
                         context.cost(), rule.effectiveCapacity(), ruleId);
-                return RateLimitDecision.costExceedsCapacity(ruleId, "Request exceeds the maximum allowed batch size (" + rule.effectiveCapacity() +
-                        ") for " + dimension.name().toLowerCase() + ".");
+                return RateLimitDecision.costExceedsCapacity(ruleId,
+                        "Request exceeds maximum allowed batch size (" + rule.effectiveCapacity() + ") for " + dimension.name().toLowerCase() + ".");
             }
 
             LimitStrategy strategy = strategyRegistry.get(rule.strategyType());
-            String key = identity + ":" + rule.windowSize();
+            String key = identity + ":" + rule.strategyType().name() + ":" + rule.windowSize();
 
-            if (!strategy.tryConsume(key, rule, context.cost(), store)) {
+            // PHASE 1: Read-Only Inspection (No Redis Mutation)
+            if (!strategy.canConsume(key, rule, context.cost(), store)) {
                 Duration retry = strategy.retryAfter(key, rule, store);
-                log.debug("Rate limit exceeded for key: {} on rule: {}. Retry after: {}s", key, ruleId, retry.toSeconds());
+                log.debug("Rate limit exceeded during inspect for key: {} on rule: {}. Retry after: {}s", key, ruleId, retry.toSeconds());
                 return RateLimitDecision.rateExceeded(ruleId, retry,
-                        "Rate limit exceeded for " + dimension.name().toLowerCase() +
-                                ". Try again in " + retry.toSeconds() + "s.");
+                        "Rate limit exceeded for " + dimension.name().toLowerCase() + ". Try again in " + retry.toSeconds() + "s.");
             }
+
+            // Collect item for Phase 2 Commit
+            commitItems.add(new RateLimitCommitItem(key, rule, strategy, context.cost()));
         }
 
-        log.debug("Rate limit checks passed for dimension: {}", dimension);
-        return RateLimitDecision.allow();
+        log.debug("Rate limit inspect passed for dimension: {}", dimension);
+        return RateLimitDecision.allowed(commitItems);
     }
 
     private String resolveKey(Dimension dimension, RateLimitContext ctx) {

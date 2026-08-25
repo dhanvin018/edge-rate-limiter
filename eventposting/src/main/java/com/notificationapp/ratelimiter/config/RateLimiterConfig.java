@@ -2,12 +2,12 @@ package com.notificationapp.ratelimiter.config;
 
 import com.notificationapp.ratelimiter.limiter.CompositeRateLimiter;
 import com.notificationapp.ratelimiter.limiter.RateLimiterFactory;
-import com.notificationapp.ratelimiter.store.RateLimitStore;
-import com.notificationapp.ratelimiter.strategy.StrategyRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.time.Clock;
 
 @Configuration
 public class RateLimiterConfig {
@@ -25,4 +25,8 @@ public class RateLimiterConfig {
         return compositeRateLimiter;
     }
 
+    @Bean
+    public Clock clock() {
+        return Clock.systemUTC();
+    }
 }

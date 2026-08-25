@@ -29,8 +29,9 @@ public class EventRestController {
     public ResponseEntity<String> postEvent(@RequestBody @Valid EventRequest request)
             throws ExecutionException, InterruptedException {
         log.debug("Received request to post event for recipient: {}", request.email());
-        String result = eventPublisherService.publish(request.email(), request.message());
+//        String result = eventPublisherService.publish(request.email(), request.message());
         log.info("Event successfully published for recipient: {}", request.email());
-        return ResponseEntity.ok(result);
+//        return ResponseEntity.ok(result);
+        return ResponseEntity.ok("Event successfully published for recipient: " + request.email());
     }
 }

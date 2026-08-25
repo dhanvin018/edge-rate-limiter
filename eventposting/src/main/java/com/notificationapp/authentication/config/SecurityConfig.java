@@ -1,6 +1,6 @@
 package com.notificationapp.authentication.config;
 
-import com.notificationapp.authentication.authfilter.RateLimitAuthFilter;
+import com.notificationapp.ratelimiter.limiter.RateLimitFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,10 +25,10 @@ public class SecurityConfig {
 
     @Value("${authentication.required:true}")
     private boolean authenticationRequired;
-    private final RateLimitAuthFilter rateLimitAuthFilter;
+    private final RateLimitFilter rateLimitFilter;
 
-    public SecurityConfig(RateLimitAuthFilter rateLimitAuthFilter) {
-        this.rateLimitAuthFilter = rateLimitAuthFilter;
+    public SecurityConfig(RateLimitFilter rateLimitFilter) {
+        this.rateLimitFilter = rateLimitFilter;
     }
 
     @Bean
@@ -56,7 +56,7 @@ public class SecurityConfig {
                                 .anyRequest().authenticated();
                     }
                 })
-                .addFilterBefore(rateLimitAuthFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

@@ -1,0 +1,13 @@
+rate-limiter:
+  enabled: true
+
+  # Global rate limiting setup using Token Bucket
+  global:
+    windows:
+      - size: 1s                   # Refill window interval
+        limit: 10                  # Maximum bucket capacity (10 tokens max burst)
+        strategy: TOKEN_BUCKET
+        local-batch:
+          enabled: true
+          batch-size: 5            # Number of tokens each local instance leases from Redis
+          refill-threshold: 2      # Trigger background lease top-up when local count drops to/below 2

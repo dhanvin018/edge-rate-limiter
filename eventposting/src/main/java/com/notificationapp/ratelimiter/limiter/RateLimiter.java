@@ -5,4 +5,5 @@ import com.notificationapp.ratelimiter.model.RateLimitDecision;
 
 public interface RateLimiter {
     RateLimitDecision evaluate(RateLimitContext context);
+    boolean commit(java.util.List<com.notificationapp.ratelimiter.model.RateLimitCommitItem> commitItems);
 }

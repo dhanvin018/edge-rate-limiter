@@ -1,0 +1,35 @@
+rate-limiter:
+  enabled: true
+
+  # Dimension evaluation hierarchy order
+  dimension-order:
+    - GLOBAL
+    - IP_ADDRESS
+    - USER_ID
+
+  # 1. GLOBAL Dimension: Enforces global burst protection via TOKEN_BUCKET
+  global:
+    windows:
+      - size: 1s
+        limit: 10
+        strategy: TOKEN_BUCKET
+        local-batch:
+          enabled: true
+          batch-size: 5
+          refill-threshold: 2
+
+  # 2. IP_ADDRESS Dimension: Enforces per-IP burst limits via SLIDING_WINDOW_COUNTER
+  ip:
+    windows:
+      - size: 1s
+        limit: 5
+        strategy: SLIDING_WINDOW_COUNTER
+
+  # 3. USER_ID Dimension: Enforces per-user limits via FIXED_WINDOW
+  user:
+    tiers:
+      FREE:
+        windows:
+          - size: 1s
+            limit: 3
+            strategy: FIXED_WINDOW

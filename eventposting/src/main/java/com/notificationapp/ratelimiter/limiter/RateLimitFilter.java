@@ -1,8 +1,7 @@
-package com.notificationapp.authentication.authfilter;
+package com.notificationapp.ratelimiter.limiter;
 
 import com.notificationapp.authentication.model.UserTier;
 import com.notificationapp.authentication.services.JwtService;
-import com.notificationapp.ratelimiter.limiter.RateLimiter;
 import com.notificationapp.ratelimiter.model.RateLimitContext;
 import com.notificationapp.ratelimiter.model.RateLimitDecision;
 import jakarta.servlet.FilterChain;
@@ -22,15 +21,15 @@ import java.io.IOException;
 import java.util.Collections;
 
 @Component
-public class RateLimitAuthFilter extends OncePerRequestFilter {
+public class RateLimitFilter extends OncePerRequestFilter {
 
-    private static final Logger log = LoggerFactory.getLogger(RateLimitAuthFilter.class);
+    private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
 
     private final JwtService jwtService;
     private final RateLimiter rateLimiter;
     private final boolean authenticationRequired;
 
-    public RateLimitAuthFilter(
+    public RateLimitFilter(
             JwtService jwtService,
             RateLimiter rateLimiter,
             @Value("${authentication.required:true}") boolean authenticationRequired
@@ -49,7 +48,7 @@ public class RateLimitAuthFilter extends OncePerRequestFilter {
 
         // Skip auth/rate-limiting endpoints
         if (requestUri.startsWith("/api/v1/auth")) {
-            log.debug("Bypassing RateLimitAuthFilter for authentication endpoint: {}", requestUri);
+            log.debug("Bypassing RateLimitFilter for authentication endpoint: {}", requestUri);
             filterChain.doFilter(request, response);
             return;
         }
@@ -59,7 +58,8 @@ public class RateLimitAuthFilter extends OncePerRequestFilter {
         String username = null;
         UserTier userTier = UserTier.FREE;
 
-        if (authenticationRequired && authHeader != null && authHeader.startsWith("Bearer ")) {
+
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
             String token = authHeader.substring(7);
             if (jwtService.isTokenValid(token)) {
                 username = jwtService.extractUsername(token);
@@ -72,11 +72,29 @@ public class RateLimitAuthFilter extends OncePerRequestFilter {
                         userTier = UserTier.FREE;
                     }
                 }
-                log.debug("Successfully authenticated user '{}' with tier '{}'", username, userTier);
+                log.debug("Successfully extracted identity for user '{}' with tier '{}' via JWT", username, userTier);
             } else {
                 log.warn("Invalid or expired JWT token received from IP: {}", ipAddress);
             }
+        }
 
+        if (username == null) {
+            // ADDED: Read raw user ID from request header
+            username = request.getHeader("X-User-Id");
+        }
+
+        String headerTier = request.getHeader("X-User-Tier");
+        if (headerTier != null && !headerTier.isBlank()) {
+            try {
+                // ADDED: Resolve dynamic user tier from request header
+                userTier = UserTier.valueOf(headerTier.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                log.warn("Unknown X-User-Tier header value '{}'. Defaulting to FREE.", headerTier);
+                userTier = UserTier.FREE;
+            }
+        }
+
+        if (authenticationRequired) {
             if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                         username,
@@ -85,8 +103,10 @@ public class RateLimitAuthFilter extends OncePerRequestFilter {
                 );
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authToken);
+            } else if (username == null) {
+                log.warn("Authentication required but no valid identity found for request to {}", requestUri);
             }
-        } else if (!authenticationRequired) {
+        } else {
             log.trace("Authentication is disabled by configuration for request to {}", requestUri);
         }
 
@@ -110,7 +130,20 @@ public class RateLimitAuthFilter extends OncePerRequestFilter {
             return;
         }
 
-        log.trace("Rate limit check passed for request [URI: {}, IP: {}]", requestUri, ipAddress);
+        log.trace("Rate limit check passed for request [URI: {}, IP: {}], commiting changes to Redis", requestUri, ipAddress);
+
+        boolean committedSuccessfully = rateLimiter.commit(decision.commitItems());
+
+        if (!committedSuccessfully) {
+            log.error("Commit phase failed for request URI: {}. Rejecting request under Fail-Closed policy.",
+                    request.getRequestURI());
+
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            response.setContentType("text/plain");
+            response.getWriter().write("503 Service Unavailable: Rate limiter state commit failed.");
+            return;
+        }
+
         filterChain.doFilter(request, response);
     }
 }

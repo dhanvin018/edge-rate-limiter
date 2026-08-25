@@ -7,6 +7,7 @@ import com.notificationapp.ratelimiter.store.RateLimitStore;
 import com.notificationapp.ratelimiter.strategy.StrategyRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -19,13 +20,16 @@ public class RateLimiterFactory {
     private final RateLimitConfigProvider configProvider;
     private final RateLimitStore store;
     private final StrategyRegistry strategyRegistry;
+    private final StringRedisTemplate redisTemplate;
 
     public RateLimiterFactory(RateLimitConfigProvider configProvider,
                               RateLimitStore store,
-                              StrategyRegistry strategyRegistry) {
+                              StrategyRegistry strategyRegistry,
+                              StringRedisTemplate redisTemplate) {
         this.configProvider = configProvider;
         this.store = store;
         this.strategyRegistry = strategyRegistry;
+        this.redisTemplate = redisTemplate;
     }
 
     public CompositeRateLimiter createCompositeLimiter(RateLimitProperties props) {
@@ -36,7 +40,7 @@ public class RateLimiterFactory {
                 .toList();
 
         log.debug("Successfully created CompositeRateLimiter with {} dimension limiter(s)", limiters.size());
-        return new CompositeRateLimiter(limiters);
+        return new CompositeRateLimiter(limiters, redisTemplate, store);
     }
 
     private DimensionLimiter createDimensionLimiter(Dimension dimension) {

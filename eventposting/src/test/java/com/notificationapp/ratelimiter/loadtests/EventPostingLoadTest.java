@@ -20,21 +20,23 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @SpringBootTest
 @AutoConfigureMockMvc
 @TestPropertySource(properties = "authentication.required=false")
 class EventPostingLoadTest {
+    private static final Logger logger = LoggerFactory.getLogger(EventPostingLoadTest.class);
 
     @Autowired
     private MockMvc mockMvc;
 
     @Test
     @DisplayName("Load Test: Send 499 concurrent requests to /api/events/postEvent")
-    void testSend499Requests() throws InterruptedException, IOException {
-        int totalRequests = 501;
-        int threadPoolSize = 1;
+    void testSend499RequestsMockMvc() throws InterruptedException, IOException {
+        int totalRequests = 700;
+        int threadPoolSize = 50;
 
         ExecutorService executor = Executors.newFixedThreadPool(threadPoolSize);
         CountDownLatch startLatch = new CountDownLatch(1); // Synchronizes simultaneous release
@@ -91,12 +93,12 @@ class EventPostingLoadTest {
         executor.shutdown();
 
         // Diagnostic output
-        System.out.println("================ LOAD TEST RESULTS ================");
-        System.out.println("Total Requests Executed: " + totalRequests);
-        System.out.println("Successful (2xx): " + successCount.get());
-        System.out.println("Rate Limited (429): " + rateLimitedCount.get());
-        System.out.println("Other Failures: " + otherErrorCount.get());
-        System.out.println("===================================================");
+        logger.info("================ LOAD TEST RESULTS ================");
+        logger.info("Total Requests Executed: {}", totalRequests);
+        logger.info("Successful (2xx): {}", successCount.get());
+        logger.info("Rate Limited (429): {}", rateLimitedCount.get());
+        logger.info("Other Failures: {}", otherErrorCount.get());
+        logger.info("===================================================");
 
         // Verification
         assertThat(successCount.get() + rateLimitedCount.get() + otherErrorCount.get())

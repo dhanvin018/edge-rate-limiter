@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- Standard Spring Boot Logback Console Appender -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <!-- File Appender Configuration -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <!-- Path where the log file will be saved -->
+        <file>logs/application.log</file>
+
+        <encoder>
+            <pattern>${FILE_LOG_PATTERN}</pattern>
+            <charset>utf8</charset>
+        </encoder>
+
+        <!-- Roll log files when they reach 10MB or daily -->
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>logs/archived/application-%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>10MB</maxFileSize>
+            <maxHistory>7</maxHistory>
+            <totalSizeCap>1GB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Logger Level Configurations -->
+    <logger name="com.notificationapp" level="DEBUG" />
+    <logger name="org.springframework.data.redis" level="DEBUG" />
+    <logger name="org.springframework.data.redis.core.RedisConnectionUtils" level="DEBUG" />
+    <logger name="io.lettuce.core" level="DEBUG" />
+    <logger name="org.springframework.security" level="DEBUG" />
+    <logger name="org.springframework.web" level="DEBUG" />
+    <logger name="org.jline" level="DEBUG" />
+
+    <!-- Root Logger (Outputs to both Console and File) -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE" />
+        <appender-ref ref="FILE" />
+    </root>
+</configuration>

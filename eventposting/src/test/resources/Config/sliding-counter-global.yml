@@ -1,0 +1,6 @@
+rate-limiter:
+  global:
+    windows:
+      - size: 10s
+        limit: 10
+        strategy: SLIDING_WINDOW_COUNTER

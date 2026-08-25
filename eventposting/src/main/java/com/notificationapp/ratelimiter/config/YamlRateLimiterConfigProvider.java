@@ -3,6 +3,7 @@ package com.notificationapp.ratelimiter.config;
 import com.notificationapp.authentication.model.UserTier;
 import com.notificationapp.ratelimiter.model.Dimension;
 import com.notificationapp.ratelimiter.model.LimitStrategyType;
+import com.notificationapp.ratelimiter.model.LocalBatchConfig;
 import com.notificationapp.ratelimiter.model.WindowRule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,18 +48,40 @@ public class YamlRateLimiterConfigProvider implements RateLimitConfigProvider {
         };
 
         if (section == null || section.getWindows() == null || section.getWindows().isEmpty()) {
-            log.warn("No YAML window configurations found for dimension: {}. Applying default fallback rules", dimension);
-            return getDefaultFallbackRules(dimension);
+            log.warn("No YAML window configurations found for dimension: {}. Returning null", dimension);
+            return null;
         }
 
         List<WindowRule> rules = section.getWindows().stream()
-                .map(ruleProps -> new WindowRule(
-                        dimension,
-                        ruleProps.getSize(),
-                        ruleProps.getLimit(),
-                        ruleProps.getStrategy(),
-                        ruleProps.getBurstCapacity()
-                ))
+                .map(ruleProps -> {
+                    LocalBatchConfig localBatchConfig;
+
+                    if (ruleProps.getLocalBatch() != null) {
+                        var batch = ruleProps.getLocalBatch();
+                        localBatchConfig = new LocalBatchConfig(
+                                batch.isEnabled(),
+                                batch.getBatchSize(),
+                                batch.getRefillThreshold()
+                        );
+                        log.debug("Mapped LocalBatchConfig [enabled={}, batchSize={}, refillThreshold={}] for strategy {}",
+                                localBatchConfig.enabled(),
+                                localBatchConfig.batchSize(),
+                                localBatchConfig.refillThreshold(),
+                                ruleProps.getStrategy());
+                    } else {
+                        localBatchConfig = LocalBatchConfig.disabled();
+                        log.debug("No local-batch config provided for strategy {}. Defaulting to disabled", ruleProps.getStrategy());
+                    }
+
+                    return new WindowRule(
+                            dimension,
+                            ruleProps.getSize(),
+                            ruleProps.getLimit(),
+                            ruleProps.getStrategy(),
+                            ruleProps.getBurstCapacity(),
+                            localBatchConfig
+                    );
+                })
                 .collect(Collectors.toList());
 
         log.debug("Loaded {} YAML rate limit rule(s) for user tier: {} and dimension: {}", rules.size(), userTier, dimension);

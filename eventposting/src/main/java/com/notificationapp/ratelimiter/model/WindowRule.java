@@ -7,8 +7,12 @@ public record WindowRule(
         Duration windowSize,
         long limit,
         LimitStrategyType strategyType,
-        Long burstCapacity
+        Long burstCapacity,
+        LocalBatchConfig localBatch
 ) {
+    public WindowRule(Dimension dimension, Duration windowSize, long limit, LimitStrategyType strategyType, Long burstCapacity) {
+        this(dimension, windowSize, limit, strategyType, burstCapacity, LocalBatchConfig.disabled());
+    }
     public long effectiveCapacity(){
         return burstCapacity!=null?burstCapacity:limit;
     }

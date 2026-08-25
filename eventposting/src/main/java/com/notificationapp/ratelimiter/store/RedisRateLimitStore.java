@@ -3,10 +3,12 @@ package com.notificationapp.ratelimiter.store;
 import com.notificationapp.ratelimiter.model.WindowRule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
@@ -19,32 +21,30 @@ public class RedisRateLimitStore implements RateLimitStore {
 
     private final StringRedisTemplate redisTemplate;
     private final RedisScript<Long> tokenBucketLeaseScript;
+    private final Clock clock; // Injected Spring Clock bean
 
     public RedisRateLimitStore(StringRedisTemplate redisTemplate,
-                               RedisScript<Long> tokenBucketLeaseScript) {
+                               @Qualifier("tokenBucketLeaseScript") RedisScript<Long> tokenBucketScript,
+                               Clock clock) {
         this.redisTemplate = redisTemplate;
-        this.tokenBucketLeaseScript = tokenBucketLeaseScript;
+        this.tokenBucketLeaseScript = tokenBucketScript;
+        this.clock = clock;
     }
 
     /**
      * Executes the atomic Lua script in Redis to grant a batch lease.
      */
     public long leaseTokenBucket(String key, long capacity, double refillRatePerMs, int requestedBatch) {
-        log.debug("Executing token bucket lease script for key: {}, requestedBatch: {}", key, requestedBatch);
-        List<String> keys = Collections.singletonList(key);
+        long currentAppTimeMs = clock.millis(); // <-- FIX: Uses MutableClock during tests
 
-        Long granted = redisTemplate.execute(
+        return redisTemplate.execute(
                 tokenBucketLeaseScript,
-                keys,
+                Collections.singletonList(key),
                 String.valueOf(capacity),
                 String.valueOf(refillRatePerMs),
                 String.valueOf(requestedBatch),
-                String.valueOf(System.currentTimeMillis())
+                String.valueOf(currentAppTimeMs)
         );
-
-        long result = granted != null ? granted : 0L;
-        log.debug("Lease result for key: {}: granted = {}", key, result);
-        return result;
     }
 
     /**
