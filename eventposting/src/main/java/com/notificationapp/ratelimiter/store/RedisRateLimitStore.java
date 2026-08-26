@@ -1,13 +1,20 @@
 package com.notificationapp.ratelimiter.store;
 
+import com.notificationapp.ratelimiter.model.RedisCommit;
 import com.notificationapp.ratelimiter.model.WindowRule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.RedisSystemException;
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.connection.ReturnType;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Collections;
@@ -20,37 +27,296 @@ public class RedisRateLimitStore implements RateLimitStore {
     private static final Logger log = LoggerFactory.getLogger(RedisRateLimitStore.class);
 
     private final StringRedisTemplate redisTemplate;
-    private final RedisScript<Long> tokenBucketLeaseScript;
+
+    private final RedisScript<Long> tokenBucketReadScript;
+    private final RedisScript<Long> tokenBucketWriteScript;
+
+    private final RedisScript<Long> fixedWindowScript;
+    private final RedisScript<Long> fixedWindowReadScript;
+    private final RedisScript<Long> fixedWindowWriteScript;
+
+    private final RedisScript<Long> slidingWindowLogReadScript;
+    private final RedisScript<Long> slidingWindowLogWriteScript;
+    private final RedisScript<Long> slidingWindowLogScript;
+
+    private final RedisScript<Long> slidingWindowCounterReadScript;
+    private final RedisScript<Long> slidingWindowCounterScript;
+    private final RedisScript<Long> slidingWindowCounterWriteScript;
+
     private final Clock clock; // Injected Spring Clock bean
 
     public RedisRateLimitStore(StringRedisTemplate redisTemplate,
-                               @Qualifier("tokenBucketLeaseScript") RedisScript<Long> tokenBucketScript,
+                               @Qualifier("tokenBucketReadScript") RedisScript<Long> tokenBucketReadScript,
+                               @Qualifier("tokenBucketWriteScript") RedisScript<Long> tokenBucketWriteScript,
+                               @Qualifier("fixedWindowScript") RedisScript<Long> fixedWindowScript,
+                               @Qualifier("fixedWindowReadScript") RedisScript<Long> fixedWindowReadScript,
+                               @Qualifier("fixedWindowWriteScript") RedisScript<Long> fixedWindowWriteScript,
+                               @Qualifier("slidingWindowLogScript") RedisScript<Long> slidingWindowLogScript,
+                               @Qualifier("slidingWindowLogReadScript") RedisScript<Long> slidingWindowLogReadScript,
+                               @Qualifier("slidingWindowLogWriteScript") RedisScript<Long> slidingWindowLogWriteScript,
+                               @Qualifier("slidingWindowCounterReadScript") RedisScript<Long> slidingWindowCounterReadScript,
+                               @Qualifier("slidingWindowCounterScript") RedisScript<Long> slidingWindowCounterScript,
+                               @Qualifier("slidingWindowCounterWriteScript") RedisScript<Long> slidingWindowCounterWriteScript,
                                Clock clock) {
         this.redisTemplate = redisTemplate;
-        this.tokenBucketLeaseScript = tokenBucketScript;
+        this.tokenBucketReadScript = tokenBucketReadScript;
+        this.tokenBucketWriteScript = tokenBucketWriteScript;
+        this.fixedWindowScript = fixedWindowScript;
+        this.fixedWindowReadScript = fixedWindowReadScript;
+        this.fixedWindowWriteScript = fixedWindowWriteScript;
+        this.slidingWindowLogScript = slidingWindowLogScript;
+        this.slidingWindowLogReadScript = slidingWindowLogReadScript;
+        this.slidingWindowLogWriteScript = slidingWindowLogWriteScript;
+        this.slidingWindowCounterReadScript = slidingWindowCounterReadScript;
+        this.slidingWindowCounterScript = slidingWindowCounterScript;
+        this.slidingWindowCounterWriteScript = slidingWindowCounterWriteScript;
         this.clock = clock;
     }
+    @Override
+    public boolean evaluateFixedWindowRead(String windowKey, long capacity, int cost) {
+        try {
+            Long result = redisTemplate.execute(
+                    fixedWindowReadScript,
+                    Collections.singletonList(windowKey),
+                    String.valueOf(capacity),
+                    String.valueOf(cost)
+            );
+            return result == 1L;
+        } catch (RedisConnectionFailureException | RedisSystemException e) {
+            log.error("Redis unavailable during fixed window read evaluation for key: {}. Failing closed.", windowKey, e);
+            return false;
+        }
+    }
 
-    /**
-     * Executes the atomic Lua script in Redis to grant a batch lease.
-     */
+    @Override
+    public boolean evaluateFixedWindowAtomic(String windowKey, long capacity, long windowSizeMs, int cost) {
+        try {
+            Long result = redisTemplate.execute(
+                    fixedWindowScript,
+                    Collections.singletonList(windowKey),
+                    String.valueOf(capacity),
+                    String.valueOf(windowSizeMs),
+                    String.valueOf(cost)
+            );
+            return result == 1L;
+        } catch (RedisConnectionFailureException | RedisSystemException e) {
+            log.error("Redis unavailable during fixed window atomic evaluation for key: {}. Failing closed.", windowKey, e);
+            return false;
+        }
+    }
+
+    @Override
+    public void commitFixedWindowToPipeline(String windowKey, int cost, long windowSizeMs) {
+
+        redisTemplate.execute((RedisCallback<Object>) connection -> {
+            connection.evalSha(
+                    fixedWindowWriteScript.getSha1(),
+                    ReturnType.INTEGER,
+                    1,
+                    windowKey.getBytes(StandardCharsets.UTF_8),
+                    String.valueOf(cost).getBytes(StandardCharsets.UTF_8),
+                    String.valueOf(windowSizeMs).getBytes(StandardCharsets.UTF_8)
+            );
+            return null;
+        });
+    }
+
+    @Override
+    public boolean evaluateSlidingWindowCounterRead(String currentKey, String previousKey, long capacity, long windowMs, long now, int cost) {
+        try {
+            Long result = redisTemplate.execute(
+                    slidingWindowCounterReadScript,
+                    List.of(currentKey, previousKey),
+                    String.valueOf(capacity),
+                    String.valueOf(windowMs),
+                    String.valueOf(now),
+                    String.valueOf(cost)
+            );
+            return result == 1L;
+        } catch (RedisConnectionFailureException | RedisSystemException e) {
+            log.error("Redis unavailable during sliding window counter read evaluation for key: {}. Failing closed.", currentKey, e);
+            return false;
+        }
+    }
+
+    @Override
+    public boolean evaluateSlidingWindowCounterAtomic(String currentKey, String previousKey, long capacity, long windowMs, long now, int cost) {
+        try {
+            Long result = redisTemplate.execute(
+                    slidingWindowCounterScript,
+                    List.of(currentKey, previousKey),
+                    String.valueOf(capacity),
+                    String.valueOf(windowMs),
+                    String.valueOf(now),
+                    String.valueOf(cost)
+            );
+            return result == 1L;
+        } catch (RedisConnectionFailureException | RedisSystemException e) {
+            log.error("Redis unavailable during sliding window counter atomic evaluation for key: {}. Failing closed.", currentKey, e);
+            return false;
+        }
+    }
+
+    @Override
+    public void commitSlidingWindowCounterToPipeline(String currentKey, int cost, long windowMs) {
+        redisTemplate.execute((RedisCallback<Object>) connection -> {
+            connection.evalSha(
+                    slidingWindowCounterWriteScript.getSha1(),
+                    ReturnType.INTEGER,
+                    1,
+                    currentKey.getBytes(StandardCharsets.UTF_8),
+                    String.valueOf(cost).getBytes(StandardCharsets.UTF_8),
+                    String.valueOf(windowMs).getBytes(StandardCharsets.UTF_8)
+            );
+            return null;
+        });
+    }
+
+    @Override
+    public boolean evaluateSlidingWindowLogRead(String key, long capacity, long windowMs, long now) {
+        try {
+            Long result = redisTemplate.execute(
+                    slidingWindowLogReadScript,
+                    Collections.singletonList(key),
+                    String.valueOf(capacity),
+                    String.valueOf(windowMs),
+                    String.valueOf(now)
+            );
+            return result == 1L;
+        } catch (RedisConnectionFailureException | RedisSystemException e) {
+            log.error("Redis unavailable during sliding window log read evaluation for key: {}. Failing closed.", key, e);
+            return false;
+        }
+    }
+
+    @Override
+    public boolean evaluateSlidingWindowLogAtomic(String key, long capacity, long windowMs, long now, String uniqueMemberId) {
+        try {
+            Long result = redisTemplate.execute(
+                    slidingWindowLogScript,
+                    Collections.singletonList(key),
+                    String.valueOf(capacity),
+                    String.valueOf(windowMs),
+                    String.valueOf(now),
+                    uniqueMemberId
+            );
+            return result == 1L;
+        } catch (RedisConnectionFailureException | RedisSystemException e) {
+            log.error("Redis unavailable during sliding window log atomic evaluation for key: {}. Failing closed.", key, e);
+            return false;
+        }
+    }
+
+    @Override
+    public void commitSlidingWindowLogToPipeline(String key, long windowMs, long now, String uniqueMemberId) {
+        // Active pipeline execution during executePipeline pass
+        redisTemplate.execute((RedisCallback<Object>) connection -> {
+            connection.evalSha(
+                    slidingWindowLogWriteScript.getSha1(),
+                    ReturnType.INTEGER,
+                    1,
+                    key.getBytes(StandardCharsets.UTF_8),
+                    String.valueOf(windowMs).getBytes(StandardCharsets.UTF_8),
+                    String.valueOf(now).getBytes(StandardCharsets.UTF_8),
+                    uniqueMemberId.getBytes(StandardCharsets.UTF_8)
+            );
+            return null;
+        });
+    }
+
+    @Override
+    public boolean executePipeline(List<RedisCommit> commitItems) {
+        if (commitItems == null || commitItems.isEmpty()) {
+            log.trace("No items to commit to Redis pipeline.");
+            return true;
+        }
+
+        log.debug("Starting Phase 2 Redis pipelined commit for {} item(s)", commitItems.size());
+
+        try {
+            redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                for (RedisCommit item : commitItems) {
+                    log.trace("Enqueuing write script for key [{}] via strategy [{}]",
+                            item.key(), item.strategy().type());
+
+                    item.strategy().commit(
+                            item.key(),
+                            item.rule(),
+                            item.cost(),
+                            this
+                    );
+                }
+                return null;
+            });
+
+            log.debug("Successfully flushed Phase 2 commit pipeline across all dimensions.");
+            return true;
+
+        } catch (Exception e) {
+            log.error("Failed to commit rate limit state to Redis during Phase 2 pipeline. " +
+                    "Applying Fallback Strategy (Fail Closed / Reject). Error: {}", e.getMessage(), e);
+            return false;
+        }
+    }
+
+    @Override
+    public boolean inspectTokenBucketRead(String key, long capacity, double refillRatePerMs, int cost) {
+        try {
+            Long result = redisTemplate.execute(
+                    tokenBucketReadScript,
+                    Collections.singletonList(key),
+                    String.valueOf(capacity),
+                    String.valueOf(refillRatePerMs),
+                    String.valueOf(cost),
+                    String.valueOf(clock.millis())
+            );
+            return result != null && result == 1L;
+        } catch (RedisConnectionFailureException | RedisSystemException e) {
+            log.error("Redis unavailable during token bucket read evaluation for key: {}. Failing closed.", key, e);
+            return false;
+        }
+    }
+
+    @Override
     public long leaseTokenBucket(String key, long capacity, double refillRatePerMs, int requestedBatch) {
         long currentAppTimeMs = clock.millis();
+        try {
+            Long grantedTokens = redisTemplate.execute(
+                    tokenBucketWriteScript,
+                    Collections.singletonList(key),
+                    String.valueOf(capacity),
+                    String.valueOf(refillRatePerMs),
+                    String.valueOf(requestedBatch),
+                    String.valueOf(currentAppTimeMs)
+            );
+            return grantedTokens != null ? grantedTokens : 0L;
+        } catch (RedisConnectionFailureException | RedisSystemException e) {
+            log.error("Redis unavailable during token bucket lease for key: {}. Failing closed.", key, e);
+            return 0L;
+        }
+    }
 
-        return redisTemplate.execute(
-                tokenBucketLeaseScript,
-                Collections.singletonList(key),
-                String.valueOf(capacity),
-                String.valueOf(refillRatePerMs),
-                String.valueOf(requestedBatch),
-                String.valueOf(currentAppTimeMs)
-        );
+    @Override
+    public void commitTokenBucketToPipeline(String key, long capacity, double refillRatePerMs, int cost, long now) {
+        redisTemplate.execute((RedisCallback<Object>) connection -> {
+            connection.evalSha(
+                    tokenBucketWriteScript.getSha1(),
+                    ReturnType.INTEGER,
+                    1,
+                    key.getBytes(StandardCharsets.UTF_8),                            // KEYS[1]
+                    String.valueOf(capacity).getBytes(StandardCharsets.UTF_8),       // ARGV[1]
+                    String.valueOf(refillRatePerMs).getBytes(StandardCharsets.UTF_8), // ARGV[2]
+                    String.valueOf(cost).getBytes(StandardCharsets.UTF_8),           // ARGV[3]
+                    String.valueOf(now).getBytes(StandardCharsets.UTF_8)            // ARGV[4]
+            );
+            return null;
+        });
     }
 
     /**
      * Calculates retry duration by querying current state without consuming tokens.
      */
-    public Duration getRetryAfter(String key, WindowRule rule) {
+    public Duration getTokenBucketRetryAfter(String key, WindowRule rule) {
         log.debug("Calculating retry duration for key: {}", key);
         List<Object> state = redisTemplate.opsForHash().multiGet(key, List.of("tokens", "lastRefill"));
         if (state.get(0) == null || state.get(1) == null) {

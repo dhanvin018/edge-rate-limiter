@@ -23,7 +23,7 @@ public interface LimitStrategy {
      * Enqueues the strategy's write Lua script onto an active Redis pipeline connection.
      * Executed only when ALL evaluated dimensions pass Phase 1.
      */
-    void commit(String key, WindowRule rule, int cost, RateLimitStore store, RedisConnection connection);
+    void commit(String key, WindowRule rule, int cost, RateLimitStore store);
 
     boolean tryConsume(String key, WindowRule rule, int cost, RateLimitStore store);
     Duration retryAfter(String key, WindowRule rule, RateLimitStore store);

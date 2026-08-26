@@ -20,7 +20,6 @@ public class RateLimiterFactory {
     private final RateLimitConfigProvider configProvider;
     private final RateLimitStore store;
     private final StrategyRegistry strategyRegistry;
-    private final StringRedisTemplate redisTemplate;
 
     public RateLimiterFactory(RateLimitConfigProvider configProvider,
                               RateLimitStore store,
@@ -29,7 +28,6 @@ public class RateLimiterFactory {
         this.configProvider = configProvider;
         this.store = store;
         this.strategyRegistry = strategyRegistry;
-        this.redisTemplate = redisTemplate;
     }
 
     public CompositeRateLimiter createCompositeLimiter(RateLimitProperties props) {
@@ -40,7 +38,7 @@ public class RateLimiterFactory {
                 .toList();
 
         log.debug("Successfully created CompositeRateLimiter with {} dimension limiter(s)", limiters.size());
-        return new CompositeRateLimiter(limiters, redisTemplate, store);
+        return new CompositeRateLimiter(limiters, store);
     }
 
     private DimensionLimiter createDimensionLimiter(Dimension dimension) {

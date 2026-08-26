@@ -17,14 +17,11 @@ public class CompositeRateLimiter implements RateLimiter {
     private static final Logger log = LoggerFactory.getLogger(CompositeRateLimiter.class);
 
     private final List<DimensionLimiter> orderedLimiters;
-    private final StringRedisTemplate redisTemplate;
     private final RateLimitStore store;
 
     public CompositeRateLimiter(List<DimensionLimiter> orderedLimiters,
-                                StringRedisTemplate redisTemplate,
                                 RateLimitStore store) {
         this.orderedLimiters = orderedLimiters;
-        this.redisTemplate = redisTemplate;
         this.store = store;
     }
 
@@ -63,40 +60,6 @@ public class CompositeRateLimiter implements RateLimiter {
     // =========================================================================
     @Override
     public boolean commit(List<RedisCommit> commitItems) {
-        if (commitItems == null || commitItems.isEmpty()) {
-            log.trace("No items to commit to Redis.");
-            return true;
-        }
-
-        log.debug("Starting Phase 2 pipelined commit for {} item(s)", commitItems.size());
-
-        try {
-            redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
-                for (RedisCommit item : commitItems) {
-                    log.trace("Enqueuing write script for key [{}] via strategy [{}]",
-                            item.key(), item.strategy().type());
-
-                    item.strategy().commit(
-                            item.key(),
-                            item.rule(),
-                            item.cost(),
-                            store,
-                            connection
-                    );
-                }
-                return null; // Return null required by executePipelined contract
-            });
-
-            log.debug("Successfully flushed Phase 2 commit pipeline across all dimensions.");
-            return true;
-
-        } catch (Exception e) {
-            // Log the failure clearly with context
-            log.error("Failed to commit rate limit state to Redis during Phase 2 pipeline. " +
-                    "Applying Fallback Strategy (Fail Closed / Reject). Error: {}", e.getMessage(), e);
-
-            // Return false to signal that the commit failed due to system/datastore error
-            return false;
-        }
+        return store.executePipeline(commitItems);
     }
 }

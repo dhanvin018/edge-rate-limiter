@@ -70,7 +70,6 @@ public class DimensionLimiter {
             LimitStrategy strategy = strategyRegistry.get(rule.strategyType());
             String key = identity + ":" + rule.strategyType().name() + ":" + rule.windowSize();
 
-            // PHASE 1: Read-Only Inspection (No Redis Mutation)
             if (!strategy.canConsume(key, rule, context.cost(), store)) {
                 Duration retry = strategy.retryAfter(key, rule, store);
                 log.debug("Rate limit exceeded during inspect for key: {} on rule: {}. Retry after: {}s", key, ruleId, retry.toSeconds());
@@ -78,7 +77,6 @@ public class DimensionLimiter {
                         "Rate limit exceeded for " + dimension.name().toLowerCase() + ". Try again in " + retry.toSeconds() + "s.");
             }
 
-            // Collect item for Phase 2 Commit
             commitItems.add(new RedisCommit(key, rule, strategy, context.cost()));
         }
 
