@@ -1,0 +1,49 @@
+rate-limiter:
+  fallback-policy: FAIL_CLOSED
+  enabled: true
+
+  # Custom evaluation hierarchy order starting at USER_ID first
+  dimension-order:
+    - USER_ID
+    - IP_ADDRESS
+    - GLOBAL
+
+  # 1. USER_ID: Testing complex tiered setups with high limits and local batching
+  user:
+    tiers:
+      FREE:
+        windows:
+          - size: 100ms
+            limit: 1
+            strategy: SLIDING_WINDOW_LOG
+      PREMIUM:
+        windows:
+          - size: 1s
+            limit: 500
+            strategy: TOKEN_BUCKET
+            local-batch:
+              enabled: true
+              batch-size: 100
+              refill-threshold: 20
+          - size: 7d
+            limit: 1000000
+            strategy: SLIDING_WINDOW_COUNTER
+
+  # 2. IP_ADDRESS: Testing non-batched TOKEN_BUCKET alongside SLIDING_WINDOW_COUNTER
+  ip:
+    windows:
+      - size: 500ms
+        limit: 8
+        strategy: TOKEN_BUCKET
+        local-batch:
+          enabled: false
+      - size: 10s
+        limit: 50
+        strategy: SLIDING_WINDOW_COUNTER
+
+  # 3. GLOBAL: Final catch-all safety floor using a simple FIXED_WINDOW
+  global:
+    windows:
+      - size: 1h
+        limit: 50000
+        strategy: FIXED_WINDOW

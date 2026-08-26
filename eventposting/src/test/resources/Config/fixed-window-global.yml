@@ -1,4 +1,5 @@
 rate-limiter:
+  fallback-policy: FAIL_CLOSED
   global:
     windows:
       - size: 5s

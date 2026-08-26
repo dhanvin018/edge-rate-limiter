@@ -1,7 +1,6 @@
 package com.notificationapp.ratelimiter.strategy;
 
 import com.notificationapp.ratelimiter.model.LimitStrategyType;
-import com.notificationapp.ratelimiter.model.RateLimitContext;
 import com.notificationapp.ratelimiter.model.WindowRule;
 import com.notificationapp.ratelimiter.store.RateLimitStore;
 import org.slf4j.Logger;
@@ -121,7 +120,7 @@ public  class SlidingWindowCounterStrategy implements LimitStrategy {
                 identityKey, currentKey, previousKey);
 
 
-        Long result = 0L;
+        long result = 0L;
         try {
             result = redisTemplate.execute(
                     slidingWindowCounterScript,
@@ -136,14 +135,14 @@ public  class SlidingWindowCounterStrategy implements LimitStrategy {
             return false; // Fail closed
         }
 
-        boolean allowed = result != null && result == 1L;
+        boolean allowed = result == 1L;
         log.debug("Sliding window counter result for key {}: allowed = {}", identityKey, allowed);
         return allowed;
     }
 
     @Override
     public Duration retryAfter(String key, WindowRule rule, RateLimitStore store) {
-        long now = System.currentTimeMillis();
+        long now = clock.millis();
         long windowMs = rule.windowSize().toMillis();
         long timeIntoWindow = now % windowMs;
 

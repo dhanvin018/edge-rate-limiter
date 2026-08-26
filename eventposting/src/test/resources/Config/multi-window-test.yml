@@ -1,0 +1,60 @@
+rate-limiter:
+  fallback-policy: FAIL_CLOSED
+  enabled: true
+
+  # Dimension evaluation hierarchy order
+  dimension-order:
+    - GLOBAL
+    - IP_ADDRESS
+    - USER_ID
+
+  # 1. GLOBAL: Multi-window protection (Burst + Sustained throughput)
+  global:
+    windows:
+      - size: 3s
+        limit: 20
+        strategy: TOKEN_BUCKET
+        local-batch:
+          enabled: true
+          batch-size: 10
+          refill-threshold: 3
+      - size: 1m
+        limit: 500
+        strategy: SLIDING_WINDOW_COUNTER
+
+  # 2. IP_ADDRESS: Multi-window per-IP DDoS and scraping protection
+  ip:
+    windows:
+      - size: 1s
+        limit: 10
+        strategy: SLIDING_WINDOW_LOG
+      - size: 1h
+        limit: 1000
+        strategy: SLIDING_WINDOW_COUNTER
+
+  # 3. USER_ID: Multi-window tier strategy (Burst, Hourly, and Daily caps)
+  user:
+    tiers:
+      FREE:
+        windows:
+          - size: 1s
+            limit: 2
+            strategy: FIXED_WINDOW
+          - size: 1m
+            limit: 30
+            strategy: FIXED_WINDOW
+          - size: 1d
+            limit: 100
+            strategy: FIXED_WINDOW
+      PREMIUM:
+        windows:
+          - size: 1s
+            limit: 15
+            strategy: TOKEN_BUCKET
+            local-batch:
+              enabled: true
+              batch-size: 5
+              refill-threshold: 1
+          - size: 1m
+            limit: 300
+            strategy: SLIDING_WINDOW_COUNTER

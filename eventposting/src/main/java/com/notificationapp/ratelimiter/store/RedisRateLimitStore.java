@@ -35,7 +35,7 @@ public class RedisRateLimitStore implements RateLimitStore {
      * Executes the atomic Lua script in Redis to grant a batch lease.
      */
     public long leaseTokenBucket(String key, long capacity, double refillRatePerMs, int requestedBatch) {
-        long currentAppTimeMs = clock.millis(); // <-- FIX: Uses MutableClock during tests
+        long currentAppTimeMs = clock.millis();
 
         return redisTemplate.execute(
                 tokenBucketLeaseScript,
@@ -62,7 +62,7 @@ public class RedisRateLimitStore implements RateLimitStore {
         long lastRefill = Long.parseLong(state.get(1).toString());
 
         double refillRatePerMs = (double) rule.limit() / rule.windowSize().toMillis();
-        long elapsed = Math.max(0, System.currentTimeMillis() - lastRefill);
+        long elapsed = Math.max(0, clock.millis() - lastRefill);
         double actualTokens = Math.min(rule.effectiveCapacity(), currentTokens + (elapsed * refillRatePerMs));
 
         if (actualTokens >= 1.0) {

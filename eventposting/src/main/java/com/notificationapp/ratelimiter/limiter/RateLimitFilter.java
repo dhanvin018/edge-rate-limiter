@@ -2,6 +2,7 @@ package com.notificationapp.ratelimiter.limiter;
 
 import com.notificationapp.authentication.model.UserTier;
 import com.notificationapp.authentication.services.JwtService;
+import com.notificationapp.ratelimiter.config.FallbackPolicy;
 import com.notificationapp.ratelimiter.model.RateLimitContext;
 import com.notificationapp.ratelimiter.model.RateLimitDecision;
 import jakarta.servlet.FilterChain;
@@ -25,6 +26,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
 
+    @Value("${rate-limiter.fallback-policy:FAIL_CLOSED}")
+    private FallbackPolicy fallbackPolicy;
     private final JwtService jwtService;
     private final RateLimiter rateLimiter;
     private final boolean authenticationRequired;
@@ -53,7 +56,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
-        String ipAddress = request.getRemoteAddr();
+        String ipAddress = request.getHeader("X-Forwarded-For");
         String authHeader = request.getHeader("Authorization");
         String username = null;
         UserTier userTier = UserTier.FREE;
@@ -135,13 +138,16 @@ public class RateLimitFilter extends OncePerRequestFilter {
         boolean committedSuccessfully = rateLimiter.commit(decision.commitItems());
 
         if (!committedSuccessfully) {
-            log.error("Commit phase failed for request URI: {}. Rejecting request under Fail-Closed policy.",
-                    request.getRequestURI());
-
-            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-            response.setContentType("text/plain");
-            response.getWriter().write("503 Service Unavailable: Rate limiter state commit failed.");
-            return;
+            if (fallbackPolicy == FallbackPolicy.FAIL_CLOSED) {
+                response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+                response.setContentType("text/plain");
+                response.getWriter().write("503 Service Unavailable: Rate limiter state commit failed.");
+                return;
+            } else {
+                // FAIL_OPEN: Log warning and allow request to proceed down the filter chain
+                log.warn("Fail-Open activated for URI: {}. Request allowed despite limiter commit failure.",
+                        request.getRequestURI());
+            }
         }
 
         filterChain.doFilter(request, response);

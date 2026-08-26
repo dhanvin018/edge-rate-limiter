@@ -134,7 +134,7 @@ public class FixedWindowStrategy implements LimitStrategy {
 
     @Override
     public Duration retryAfter(String key, WindowRule rule, RateLimitStore store) {
-        long now = System.currentTimeMillis();
+        long now = clock.millis();
         long windowSizeMs = rule.windowSize().toMillis();
 
         // Time remaining until the next window starts

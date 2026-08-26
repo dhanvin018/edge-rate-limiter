@@ -131,7 +131,7 @@ public class SlidingWindowLogStrategy implements LimitStrategy {
 
     @Override
     public Duration retryAfter(String key, WindowRule rule, RateLimitStore store) {
-        long now = System.currentTimeMillis();
+        long now = clock.millis();
         long windowMs = rule.windowSize().toMillis();
         long timeIntoWindow = now % windowMs;
 

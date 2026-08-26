@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
@@ -23,11 +24,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 public abstract class BaseRateLimiterTest {
 
     protected static final Logger log = LoggerFactory.getLogger(BaseRateLimiterTest.class);
-    protected static final String BASE_URL = "http://localhost:8080/api/events/postEvent";
+    protected static final String BASE_URL = "http://localhost:";
+    protected static final String API_ENDPOINT = "/api/events/postEvent";
+    @LocalServerPort
+    protected int port;
 
     @Autowired
     private StringRedisTemplate redisTemplate;
@@ -88,7 +92,7 @@ public abstract class BaseRateLimiterTest {
                         startLatch.await(); // Synchronizes burst start time
 
                         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                                .uri(URI.create(BASE_URL))
+                                .uri(URI.create(BASE_URL + port+ API_ENDPOINT))
                                 .header("Content-Type", "application/json")
                                 .POST(HttpRequest.BodyPublishers.ofString(samplePayload));
 
@@ -124,13 +128,7 @@ public abstract class BaseRateLimiterTest {
             doneLatch.await();      // Wait for completion
         }
 
-        // Diagnostic Summary
-        log.info("================ EXECUTION SUMMARY ================");
-        log.info("Total Requests Executed : {}", totalRequests);
-        log.info("Successful (2xx)        : {}", successCount.get());
-        log.info("Rate Limited (429)      : {}", rateLimitedCount.get());
-        log.info("System Errors (5xx/Ex)  : {}", errorCount.get());
-        log.info("===================================================");
+        executionSummary(totalRequests, successCount, rateLimitedCount, errorCount);
 
         return new TestExecutionResult(
                 successCount.get(),
@@ -159,7 +157,7 @@ public abstract class BaseRateLimiterTest {
             }
             try {
                 HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                        .uri(URI.create(BASE_URL))
+                        .uri(URI.create(BASE_URL + port+ API_ENDPOINT))
                         .header("Content-Type", "application/json")
                         .POST(HttpRequest.BodyPublishers.ofString(samplePayload));
 
@@ -191,19 +189,86 @@ public abstract class BaseRateLimiterTest {
             }
         }
 
-        // Diagnostic Summary
-        log.info("================ EXECUTION SUMMARY (SEQUENTIAL) ================");
-        log.info("Total Requests Executed : {}", totalRequests);
-        log.info("Successful (2xx)        : {}", successCount);
-        log.info("Rate Limited (429)      : {}", rateLimitedCount);
-        log.info("System Errors (5xx/Ex)  : {}", errorCount);
-        log.info("================================================================");
+        executionSummary(totalRequests, new AtomicInteger(successCount), new AtomicInteger(rateLimitedCount), new AtomicInteger(errorCount));
 
         return new TestExecutionResult(
                 successCount,
                 rateLimitedCount,
                 errorCount
         );
+    }
+
+    protected TestExecutionResult executeSequentialRequestsWithDynamicHeaders(
+            int totalRequests,
+            java.util.function.IntFunction<Map<String, String>> dynamicHeadersSupplier) {
+
+        int successCount = 0;
+        int rateLimitedCount = 0;
+        int errorCount = 0;
+
+        log.info("Starting sequential execution of {} requests with dynamic headers...", totalRequests);
+
+        for (int i = 1; i <= totalRequests; i++) {
+            if (i == 9) {
+                log.info("Request #{} is queued for execution.", i);
+            }
+            try {
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                        .uri(URI.create(BASE_URL + port + API_ENDPOINT))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(samplePayload));
+
+                // Resolve dynamic headers for request index 'i' (or i - 1 if zero-based logic is needed)
+                if (dynamicHeadersSupplier != null) {
+                    Map<String, String> currentHeaders = dynamicHeadersSupplier.apply(i);
+                    if (currentHeaders != null) {
+                        currentHeaders.forEach(requestBuilder::header);
+                    }
+                }
+
+                HttpResponse<String> response = httpClient.send(
+                        requestBuilder.build(),
+                        HttpResponse.BodyHandlers.ofString()
+                );
+
+                int status = response.statusCode();
+
+                if (status >= 200 && status < 300) {
+                    successCount++;
+                } else if (status == 429) {
+                    rateLimitedCount++;
+                } else {
+                    errorCount++;
+                    log.error("[Unexpected HTTP {}] REQ #{}: {}", status, i, response.body());
+                }
+
+                log.debug("REQ #{}/{} -> Status: {}", i, totalRequests, status);
+
+            } catch (Exception e) {
+                errorCount++;
+                log.error("Execution exception on REQ #{}", i, e);
+            }
+        }
+
+        executionSummary(totalRequests, new AtomicInteger(successCount), new AtomicInteger(rateLimitedCount), new AtomicInteger(errorCount));
+
+        return new TestExecutionResult(
+                successCount,
+                rateLimitedCount,
+                errorCount
+        );
+    }
+
+
+
+    private static void executionSummary(int totalRequests, AtomicInteger successCount, AtomicInteger rateLimitedCount, AtomicInteger errorCount) {
+        // Diagnostic Summary
+        log.info("================ EXECUTION SUMMARY ================");
+        log.info("Total Requests Executed : {}", totalRequests);
+        log.info("Successful (2xx)        : {}", successCount.get());
+        log.info("Rate Limited (429)      : {}", rateLimitedCount.get());
+        log.info("System Errors (5xx/Ex)  : {}", errorCount.get());
+        log.info("===================================================");
     }
 
     public record TestExecutionResult(
