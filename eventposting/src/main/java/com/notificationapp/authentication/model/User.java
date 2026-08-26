@@ -17,7 +17,7 @@ public class User {
     private String password; // Encrypted
 
     @Enumerated(EnumType.STRING)
-    private UserTier tier = UserTier.FREE; // Useful for rate limit WindowRule filtering!
+    private UserTier tier = UserTier.FREE;
 
     public User() {}
 

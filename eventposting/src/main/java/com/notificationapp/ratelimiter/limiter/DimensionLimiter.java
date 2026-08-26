@@ -55,7 +55,7 @@ public class DimensionLimiter {
         String identity = resolveKey(dimension, context);
         log.debug("Rule count found for dimension {} : {}", dimension, rules.size());
 
-        List<RateLimitCommitItem> commitItems = new ArrayList<>();
+        List<RedisCommit> commitItems = new ArrayList<>();
 
         for (WindowRule rule : rules) {
             String ruleId = dimension + ":" + rule.strategyType() + ":" + rule.windowSize() + ":" + rule.effectiveCapacity();
@@ -79,7 +79,7 @@ public class DimensionLimiter {
             }
 
             // Collect item for Phase 2 Commit
-            commitItems.add(new RateLimitCommitItem(key, rule, strategy, context.cost()));
+            commitItems.add(new RedisCommit(key, rule, strategy, context.cost()));
         }
 
         log.debug("Rate limit inspect passed for dimension: {}", dimension);

@@ -10,7 +10,7 @@ public record RateLimitDecision(
         String violatedRule,
         Duration retryAfter,
         String userMessage,
-        List<RateLimitCommitItem> commitItems
+        List<RedisCommit> commitItems
 ) {
 
     //TODO: Refine these methods
@@ -42,7 +42,7 @@ public record RateLimitDecision(
                 Collections.emptyList());
 
     }
-    public static RateLimitDecision allowed(List<RateLimitCommitItem> commitItems) {
+    public static RateLimitDecision allowed(List<RedisCommit> commitItems) {
         return new RateLimitDecision(true, null, null, Duration.ZERO, null, commitItems);
     }
 

@@ -1,6 +1,6 @@
 package com.notificationapp.ratelimiter.limiter;
 
-import com.notificationapp.ratelimiter.model.RateLimitCommitItem;
+import com.notificationapp.ratelimiter.model.RedisCommit;
 import com.notificationapp.ratelimiter.model.RateLimitContext;
 import com.notificationapp.ratelimiter.model.RateLimitDecision;
 import com.notificationapp.ratelimiter.store.RateLimitStore;
@@ -35,7 +35,7 @@ public class CompositeRateLimiter implements RateLimiter {
     public RateLimitDecision evaluate(RateLimitContext context) {
         log.debug("Evaluating composite rate limits for context: {}", context);
 
-        List<RateLimitCommitItem> aggregatedCommitItems = new ArrayList<>();
+        List<RedisCommit> aggregatedCommitItems = new ArrayList<>();
 
         for (DimensionLimiter limiter : orderedLimiters) {
             RateLimitDecision decision = limiter.evaluate(context);
@@ -62,7 +62,7 @@ public class CompositeRateLimiter implements RateLimiter {
     // PHASE 2: ATOMIC PIPELINED COMMIT
     // =========================================================================
     @Override
-    public boolean commit(List<RateLimitCommitItem> commitItems) {
+    public boolean commit(List<RedisCommit> commitItems) {
         if (commitItems == null || commitItems.isEmpty()) {
             log.trace("No items to commit to Redis.");
             return true;
@@ -72,7 +72,7 @@ public class CompositeRateLimiter implements RateLimiter {
 
         try {
             redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
-                for (RateLimitCommitItem item : commitItems) {
+                for (RedisCommit item : commitItems) {
                     log.trace("Enqueuing write script for key [{}] via strategy [{}]",
                             item.key(), item.strategy().type());
 
