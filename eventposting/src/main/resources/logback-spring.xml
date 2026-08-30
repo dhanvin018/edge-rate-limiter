@@ -35,6 +35,7 @@
     <!-- Root Logger (Outputs to both Console and File) -->
     <root level="INFO">
         <appender-ref ref="CONSOLE" />
-        <appender-ref ref="FILE" />
+<!--        comment out the file appender reference if you want to disable file logging-->
+<!--        <appender-ref ref="FILE" />-->
     </root>
 </configuration>
