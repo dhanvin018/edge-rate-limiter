@@ -1,10 +1,13 @@
 package com.notificationapp.ratelimiter.store;
 
+import com.notificationapp.ratelimiter.config.FallbackPolicy;
 import com.notificationapp.ratelimiter.model.RedisCommit;
 import com.notificationapp.ratelimiter.model.WindowRule;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.connection.RedisConnection;
@@ -23,6 +26,9 @@ import java.util.Optional;
 
 @Component
 public class RedisRateLimitStore implements RateLimitStore {
+
+    @Value("${rate-limiter.fallback-policy:FAIL_CLOSED}")
+    private FallbackPolicy fallbackPolicy;
 
     private static final Logger log = LoggerFactory.getLogger(RedisRateLimitStore.class);
 
@@ -83,8 +89,7 @@ public class RedisRateLimitStore implements RateLimitStore {
             );
             return result == 1L;
         } catch (RedisConnectionFailureException | RedisSystemException e) {
-            log.error("Redis unavailable during fixed window read evaluation for key: {}. Failing closed.", windowKey, e);
-            return false;
+            return handleRedisException(e, "fixed window read evaluation", windowKey);
         }
     }
 
@@ -100,8 +105,7 @@ public class RedisRateLimitStore implements RateLimitStore {
             );
             return result == 1L;
         } catch (RedisConnectionFailureException | RedisSystemException e) {
-            log.error("Redis unavailable during fixed window atomic evaluation for key: {}. Failing closed.", windowKey, e);
-            return false;
+            return handleRedisException(e, "fixed window atomic evaluation", windowKey);
         }
     }
 
@@ -134,8 +138,7 @@ public class RedisRateLimitStore implements RateLimitStore {
             );
             return result == 1L;
         } catch (RedisConnectionFailureException | RedisSystemException e) {
-            log.error("Redis unavailable during sliding window counter read evaluation for key: {}. Failing closed.", currentKey, e);
-            return false;
+            return handleRedisException(e, "sliding window counter read evaluation", currentKey);
         }
     }
 
@@ -152,8 +155,7 @@ public class RedisRateLimitStore implements RateLimitStore {
             );
             return result == 1L;
         } catch (RedisConnectionFailureException | RedisSystemException e) {
-            log.error("Redis unavailable during sliding window counter atomic evaluation for key: {}. Failing closed.", currentKey, e);
-            return false;
+            return handleRedisException(e, "sliding window counter atomic evaluation", currentKey);
         }
     }
 
@@ -184,8 +186,7 @@ public class RedisRateLimitStore implements RateLimitStore {
             );
             return result == 1L;
         } catch (RedisConnectionFailureException | RedisSystemException e) {
-            log.error("Redis unavailable during sliding window log read evaluation for key: {}. Failing closed.", key, e);
-            return false;
+            return handleRedisException(e, "sliding window log read evaluation", key);
         }
     }
 
@@ -202,8 +203,7 @@ public class RedisRateLimitStore implements RateLimitStore {
             );
             return result == 1L;
         } catch (RedisConnectionFailureException | RedisSystemException e) {
-            log.error("Redis unavailable during sliding window log atomic evaluation for key: {}. Failing closed.", key, e);
-            return false;
+            return handleRedisException(e, "sliding window log read evaluation", key);
         }
     }
 
@@ -272,8 +272,7 @@ public class RedisRateLimitStore implements RateLimitStore {
             );
             return result != null && result == 1L;
         } catch (RedisConnectionFailureException | RedisSystemException e) {
-            log.error("Redis unavailable during token bucket read evaluation for key: {}. Failing closed.", key, e);
-            return false;
+            return handleRedisException(e, "token bucket read evaluation", key);
         }
     }
 
@@ -292,7 +291,15 @@ public class RedisRateLimitStore implements RateLimitStore {
             return grantedTokens != null ? grantedTokens : 0L;
         } catch (RedisConnectionFailureException | RedisSystemException e) {
             log.error("Redis unavailable during token bucket lease for key: {}. Failing closed.", key, e);
-            return 0L;
+            if (fallbackPolicy == FallbackPolicy.FAIL_CLOSED) {
+                // FAIL_CLOSED: Log warning and deny request to proceed down the filter chain
+                log.error("Fail-Closed activated for key: {} during token bucket lease operation", key, e);
+                return 0L;
+            } else {
+                // FAIL_OPEN: Log warning and allow request to proceed down the filter chain
+                log.error("Fail-Open activated for key: {} during token bucket lease operation", key, e);
+                return 1L;
+            }
         }
     }
 
@@ -340,6 +347,18 @@ public class RedisRateLimitStore implements RateLimitStore {
         Duration retryAfter = Duration.ofMillis(Math.max(0, waitTimeMs));
         log.debug("Retry duration calculated for key: {}: {}ms", key, retryAfter.toMillis());
         return retryAfter;
+    }
+
+    private boolean handleRedisException(Exception e, String operation, String key) {
+        if (fallbackPolicy == FallbackPolicy.FAIL_CLOSED) {
+            // FAIL_CLOSED: Log warning and deny request to proceed down the filter chain
+            log.error("Fail-Closed activated for key: {}, operation: {}. Request denied due to limiter store operation failure.", key, operation, e);
+            return false;
+        } else {
+            // FAIL_OPEN: Log warning and allow request to proceed down the filter chain
+            log.error("Fail-Open activated for key: {}, operation: {}. Request allowed despite limiter store operation failure.", key, operation, e);
+            return true;
+        }
     }
 
     // --- Standard KV RateLimitStore interface methods ---

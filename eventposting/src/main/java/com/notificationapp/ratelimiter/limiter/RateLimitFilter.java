@@ -31,15 +31,18 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final JwtService jwtService;
     private final RateLimiter rateLimiter;
     private final boolean authenticationRequired;
+    private final boolean rateLimitingEnabled;
 
     public RateLimitFilter(
             JwtService jwtService,
             RateLimiter rateLimiter,
-            @Value("${authentication.required:true}") boolean authenticationRequired
+            @Value("${authentication.required:true}") boolean authenticationRequired,
+            @Value("${rate-limiting.required:false}") boolean rateLimitingEnabled
     ) {
         this.jwtService = jwtService;
         this.rateLimiter = rateLimiter;
         this.authenticationRequired = authenticationRequired;
+        this.rateLimitingEnabled = rateLimitingEnabled;
     }
 
     @Override
@@ -111,6 +114,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
             }
         } else {
             log.trace("Authentication is disabled by configuration for request to {}", requestUri);
+        }
+
+        if(!rateLimitingEnabled){
+            log.trace("Rate limiting is disabled by configuration for request to {}", requestUri);
+            filterChain.doFilter(request, response);
+            return;
         }
 
         RateLimitContext context = new RateLimitContext(
