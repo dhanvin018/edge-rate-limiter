@@ -1,12 +1,12 @@
-# Application Monitoring with Prometheus and Grafana
+# Application Monitoring with Prometheus, Grafana, and Spring Boot Actuator
 
 Monitoring is a critical pillar of modern software engineering and system architecture. It gives engineering teams visibility into application health, performance bottlenecks, system resource utilization, and error rates in real time.
 
 ---
 
-## 1. What is Prometheus?
+## 1. Prometheus
 
-**Prometheus** is an open-source systems monitoring and alerting toolkit originally built at SoundCloud. It stores all data as time-series metrics, identified by a metric name and key-value pairs (labels).
+**Prometheus** stores all data as time-series metrics, identified by a metric name and key-value pairs (labels).
 
 * **Pull-Based Architecture:** Unlike push-based monitoring systems, Prometheus periodically scrapes (pulls) metrics endpoints (such as Spring Boot's `/actuator/prometheus`) over HTTP.
 * **Dimensional Data Model:** Metrics are identified by a metric name and key-value metadata pairs called labels (e.g., `http_requests_total{method="POST", handler="/events"}`).
@@ -16,9 +16,9 @@ Monitoring is a critical pillar of modern software engineering and system archit
 
 ---
 
-## 2. What is Grafana?
+## 2. Grafana
 
-**Grafana** is an open-source data visualization and analytics software. It allows users to query, visualize, alert on, and understand metrics no matter where they are stored.
+**Grafana** allows users to query, visualize, alert on, and understand metrics no matter where they are stored.
 
 * **Data Source Agnostic:** Grafana does not store time-series metrics itself. Instead, it connects directly to data sources like Prometheus, Graphite, InfluxDB, PostgreSQL, or Elasticsearch.
 * **Interactive Dashboards:** Provides customizable dashboards featuring graphs, heatmaps, single-stat panels, logs, and trace views.
@@ -27,15 +27,56 @@ Monitoring is a critical pillar of modern software engineering and system archit
 
 ---
 
-## 3. How They Work Together
+## 3. Spring Boot Actuator
 
-Prometheus acts as the **backend data engine**, while Grafana serves as the **frontend presentation layer**.
+**Spring Boot Actuator** provides production-ready features for Spring Boot applications. It acts as the instrumentation layer, exposing operational insights—such as JVM garbage collection, active threads, HTTP request latencies, and system health—via HTTP REST endpoints or JMX.
+
+Through **Micrometer** (the default metrics facade in Spring Boot), Actuator translates application runtime data into the exact format that monitoring engines like Prometheus understand.
+
+### Key Actuator Endpoints
+
+By default, Actuator endpoints are hosted under the `/actuator` path:
+
+* **`/actuator/prometheus`**
+    * **Role:** Formats and exposes application metrics in plain-text dimensional format required by Prometheus scrape jobs.
+    * **Requirement:** Requires the `micrometer-registry-prometheus` dependency in your project configuration.
+* **`/actuator/health`**
+    * **Role:** Shows application health status (`UP`, `DOWN`, `OUT_OF_SERVICE`). Can be expanded to display individual component checks (database pools, Redis connections, disk usage).
+* **`/actuator/metrics`**
+    * **Role:** Returns an inventory of available metrics (e.g., `jvm.memory.used`, `http.server.requests`). Appending a specific name (`/actuator/metrics/jvm.memory.used`) displays raw values and tag keys.
+* **`/actuator/env`**
+    * **Role:** Exposes configuration parameters from Spring’s `Environment` (system properties, environment variables, `application.yml`). Sensitive keys are masked automatically.
+* **`/actuator/loggers`**
+    * **Role:** Displays configured log levels across packages and allows real-time dynamic log-level adjustment over HTTP POST without application restarts.
+* **`/actuator/threaddump`**
+    * **Role:** Triggers and streams a full JVM thread dump for diagnosing thread lockups, CPU spikes, or deadlocks.
+* **`/actuator/httpexchanges`**
+    * **Role:** Provides trace data for recent HTTP request/response exchanges (response times, status codes, URIs).
+
+---
+
+## 4. How They Work Together
+
+1. **Spring Boot Actuator** collects internal runtime statistics and exposes them at the `/actuator/prometheus` HTTP endpoint.
+2. **Prometheus Engine** periodically polls (scrapes) the Actuator endpoint, parses the metrics, and stores them in its Time-Series Database (TSDB).
+3. **Grafana** queries Prometheus using **PromQL** to render dynamic charts, graphs, and alert visualizations.
 
 ```mermaid
 flowchart TD
-    App["Application / Exporter\n(e.g., Spring Actuator)"]
-    Prom["Prometheus Engine\n(TSDB & PromQL)"]
-    Graf["Grafana\n(Dashboards)"]
+    subgraph Spring Boot Application
+        Actuator["Spring Actuator + Micrometer"]
+        PromEndpoint["/actuator/prometheus"]
+        Actuator --> PromEndpoint
+    end
 
-    Prom -- "Scrapes /prometheus (HTTP)" --> App
-    Graf -- "Queries PromQL" --> Prom
+    subgraph Prometheus Server
+        Scraper["Scrape Engine"]
+        TSDB[(Time-Series Database)]
+        Scraper -- "1. Scrapes HTTP endpoint" --> PromEndpoint
+        Scraper -- "2. Stores raw metrics" --> TSDB
+    end
+
+    subgraph Grafana
+        Dashboard["Interactive Visual Dashboard"]
+        Dashboard -- "3. PromQL Queries" --> TSDB
+    end
