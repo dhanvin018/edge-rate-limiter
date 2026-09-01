@@ -1,4 +1,4 @@
-# Distributed Notification System
+# Edge Rate Limiter
 
 A microservices-based distributed notification architecture designed to ingest notification events, process them asynchronously, and dispatch emails.
 
