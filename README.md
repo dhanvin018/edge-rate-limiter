@@ -30,7 +30,36 @@ Detailed design and implementation documentation is available inside the [`docs/
 
 ---
 
-## 3. Test Cases, Configurations & Sample Payloads
+## 3. Pluggable Architecture & Routing
+
+The `eventposting` service features a modular, pluggable architecture where key operational subsystems—such as authentication, rate limiting, and event publishing—can be independently enabled or disabled via `application.properties`.
+
+When event posting is disabled, the service automatically acts as an identity-aware rate-limiting proxy, forwarding validated traffic to a designated downstream server.
+
+---
+
+### Component Configuration Toggles
+
+| Property | Default | Behavior when `false` |
+| :--- | :--- | :--- |
+| `authentication.required` | `true` | Skips internal JWT validation and Security Filter evaluation. Useful when deployed behind an external API gateway. |
+| `rate-limiting.required` | `true` | Bypasses the Redis-backed Distributed Rate Limiter subsystem entirely. |
+| `event.posting.enabled` | `true` | Disables internal Kafka event publishing and enables **HTTP Proxy Mode**. |
+| `external.downstream.url` | *(none)* | **Required when `event.posting.enabled=false`**. The target URL where incoming requests, headers, and payloads will be transparently forwarded. |
+
+---
+
+### Upstream Context & Header Ingestion
+
+When internal authentication is disabled (e.g., offloaded to an upstream API Gateway or edge proxy), the rate-limiting engine dynamically falls back to extracting user identity and request context directly from inbound HTTP headers:
+
+* **`X-User-Id`**: Ingested as the primary caller identifier (`username`) when local JWT context is unavailable.
+* **`X-User-Tier`**: Ingested to determine tier-based rate limit limits (e.g., `free`, `pro`, `enterprise`).
+* **`X-Forwarded-For`**: Ingested to extract the original client IP address (`ipAddress`) for IP-level rate-limiting rules.
+
+---
+
+## 4. Test Cases, Configurations & Sample Payloads
 
 All test suites, strategy configurations, and sample request payloads for the rate limiter are located within the `eventposting` test resources:
 
@@ -46,7 +75,7 @@ Located under [`eventposting/src/test/resources/`](./eventposting/src/test/resou
 
 ---
 
-## 4. Setup & Running the System
+## 5. Setup & Running the System
 
 ### Prerequisites
 * Docker & Docker Compose

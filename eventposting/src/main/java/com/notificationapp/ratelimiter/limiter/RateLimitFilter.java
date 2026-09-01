@@ -12,14 +12,20 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.Enumeration;
 
 @Component
 public class RateLimitFilter extends OncePerRequestFilter {
@@ -28,6 +34,15 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     @Value("${rate-limiter.fallback-policy:FAIL_CLOSED}")
     private FallbackPolicy fallbackPolicy;
+
+    @Value("${event.posting.enabled:true}")
+    private boolean eventPostingEnabled;
+
+    @Value("${external.downstream.url:}")
+    private String externalDownstreamUrl;
+
+    private final RestTemplate restTemplate = new RestTemplate();
+
     private final JwtService jwtService;
     private final RateLimiter rateLimiter;
     private final boolean authenticationRequired;
@@ -159,6 +174,58 @@ public class RateLimitFilter extends OncePerRequestFilter {
             }
         }
 
-        filterChain.doFilter(request, response);
+        if (eventPostingEnabled) {
+            // Event posting is enabled: continue down the local Spring filter/controller chain
+            filterChain.doFilter(request, response);
+        } else {
+            // Event posting disabled: Forward (proxy) request to external URL
+            if (externalDownstreamUrl == null || externalDownstreamUrl.isBlank()) {
+                response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "External downstream URL is not configured.");
+                return;
+            }
+            proxyRequestToExternalUrl(request, response, externalDownstreamUrl);
+        }
+    }
+
+    private void proxyRequestToExternalUrl(HttpServletRequest request, HttpServletResponse response, String targetUrl) throws IOException {
+        // Copy Headers
+        HttpHeaders headers = new HttpHeaders();
+        Enumeration<String> headerNames = request.getHeaderNames();
+        while (headerNames != null && headerNames.hasMoreElements()) {
+            String headerName = headerNames.nextElement();
+            if (!headerName.equalsIgnoreCase(HttpHeaders.HOST)) { // Exclude host header to prevent target server routing issues
+                headers.addAll(headerName, Collections.list(request.getHeaders(headerName)));
+            }
+        }
+
+        // Copy Body
+        byte[] body = request.getInputStream().readAllBytes();
+        HttpEntity<byte[]> httpEntity = new HttpEntity<>(body, headers);
+
+        try {
+            // Forward HTTP Method, Body, and Headers to the external server
+            ResponseEntity<byte[]> externalResponse = restTemplate.exchange(
+                    targetUrl,
+                    HttpMethod.valueOf(request.getMethod()),
+                    httpEntity,
+                    byte[].class
+            );
+
+            // Copy external response status, headers, and body back to original response
+            response.setStatus(externalResponse.getStatusCode().value());
+            externalResponse.getHeaders().forEach((key, values) -> {
+                for (String value : values) {
+                    response.addHeader(key, value);
+                }
+            });
+
+            if (externalResponse.getBody() != null) {
+                response.getOutputStream().write(externalResponse.getBody());
+            }
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            // Forward error responses from the downstream service
+            response.setStatus(e.getStatusCode().value());
+            response.getOutputStream().write(e.getResponseBodyAsByteArray());
+        }
     }
 }
