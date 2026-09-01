@@ -1,7 +1,7 @@
 package com.notificationapp.ratelimiter.store;
 
 import com.notificationapp.ratelimiter.config.FallbackPolicy;
-import com.notificationapp.ratelimiter.model.RedisCommit;
+import com.notificationapp.ratelimiter.model.RedisCommitModel;
 import com.notificationapp.ratelimiter.model.WindowRule;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -225,7 +225,7 @@ public class RedisRateLimitStore implements RateLimitStore {
     }
 
     @Override
-    public boolean executePipeline(List<RedisCommit> commitItems) {
+    public boolean executePipeline(List<RedisCommitModel> commitItems) {
         if (commitItems == null || commitItems.isEmpty()) {
             log.trace("No items to commit to Redis pipeline.");
             return true;
@@ -235,7 +235,7 @@ public class RedisRateLimitStore implements RateLimitStore {
 
         try {
             redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
-                for (RedisCommit item : commitItems) {
+                for (RedisCommitModel item : commitItems) {
                     log.trace("Enqueuing write script for key [{}] via strategy [{}]",
                             item.key(), item.strategy().type());
 

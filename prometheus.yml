@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 5s     # Collect metrics every 5 seconds
+  evaluation_interval: 5s # Evaluate alert rules every 5 seconds
+
+scrape_configs:
+  - job_name: 'event-posting-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['event-posting-service:8080'] # Refers to the service name in docker-compose - event-posting-service
+  - job_name: 'notification-generator'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: [ 'notification-generator:8080' ]
+  # --- Community Exporters ---
+  - job_name: 'redis'
+    static_configs:
+      - targets: [ 'redis-exporter:9121' ]

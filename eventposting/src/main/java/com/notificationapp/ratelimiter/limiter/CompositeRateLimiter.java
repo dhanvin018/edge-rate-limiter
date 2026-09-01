@@ -1,8 +1,8 @@
 package com.notificationapp.ratelimiter.limiter;
 
-import com.notificationapp.ratelimiter.model.RedisCommit;
 import com.notificationapp.ratelimiter.model.RateLimitContext;
 import com.notificationapp.ratelimiter.model.RateLimitDecision;
+import com.notificationapp.ratelimiter.model.RedisCommitModel;
 import com.notificationapp.ratelimiter.store.RateLimitStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,7 +32,7 @@ public class CompositeRateLimiter implements RateLimiter {
     public RateLimitDecision evaluate(RateLimitContext context) {
         log.debug("Evaluating composite rate limits for context: {}", context);
 
-        List<RedisCommit> aggregatedCommitItems = new ArrayList<>();
+        List<RedisCommitModel> aggregatedCommitItems = new ArrayList<>();
 
         for (DimensionLimiter limiter : orderedLimiters) {
             RateLimitDecision decision = limiter.evaluate(context);
@@ -59,7 +59,7 @@ public class CompositeRateLimiter implements RateLimiter {
     // PHASE 2: ATOMIC PIPELINED COMMIT
     // =========================================================================
     @Override
-    public boolean commit(List<RedisCommit> commitItems) {
+    public boolean commit(List<RedisCommitModel> commitItems) {
         return store.executePipeline(commitItems);
     }
 }

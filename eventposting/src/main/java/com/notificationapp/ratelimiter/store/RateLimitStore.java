@@ -1,6 +1,6 @@
 package com.notificationapp.ratelimiter.store;
 
-import com.notificationapp.ratelimiter.model.RedisCommit;
+import com.notificationapp.ratelimiter.model.RedisCommitModel;
 import com.notificationapp.ratelimiter.model.WindowRule;
 
 import java.time.Duration;
@@ -12,7 +12,7 @@ public interface RateLimitStore {
     void put(String key, Object value, Duration ttl);
     long incrementAndGet(String key, long delta, Duration ttl);
     boolean compareAndSwap(String key, Object expected, Object updated, Duration ttl);
-    boolean executePipeline(List<RedisCommit> commitItems);
+    boolean executePipeline(List<RedisCommitModel> commitItems);
 
     // --- Fixed Window Operations ---
     boolean evaluateFixedWindowRead(String windowKey, long capacity, int cost);
