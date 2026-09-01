@@ -27,6 +27,7 @@ Detailed design and implementation documentation is available inside the [`docs/
 * [`docs/redis-lua-scripts.md`](./docs/redis-lua-scripts.md): Redis Lua script architecture, SHA-1 execution, and atomic vs. R/W separation.
 * [`docs/redis-rate-limit-store.md`](./docs/redis-rate-limit-store.md): Low-level Redis storage layer, pipelining, and resilience policies.
 * [`docs/docker-compose.md`](./docs/docker-compose.md): Docker container orchestration setup and theory.
+* [`docs/monitoring-docs.md`](./docs/monitoring-docs.md): Monitoring setup and theory.
 
 ---
 
