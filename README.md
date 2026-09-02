@@ -6,6 +6,53 @@ This project serves as a practical demonstration platform built around a custom 
 
 ---
 
+## Problem Statement
+
+High-throughput, distributed applications require an edge rate-limiting subsystem capable of protecting downstream resources from traffic surges without introducing unacceptable latency. Traditional rate limiters often rely on rigid, single-dimension counters (e.g., global IP limits) and struggle with high network overhead due to constant remote state synchronization.
+
+To solve this, the rate limiter in this architecture is built as a highly customizable, multi-tier subsystem. It combines Redis-backed atomic evaluation with local batch token leasing, enforcing rate limits across dynamic identity dimensions (User, Tier, IP) while drastically reducing remote network round-trips under heavy loads.
+
+---
+
+### Functional Requirements
+
+* **Multi-Dimensional Rate Limiting**
+    * Evaluate incoming requests across multiple concurrent identity dimensions: User ID, User Tier (e.g., Free, Pro, Enterprise), and Client IP.
+    * Resolve limits dynamically based on caller identity extracted either from internal JWT claims or upstream fallback headers (`X-User-Id`, `X-User-Tier`, `X-Forwarded-For`).
+
+* **Multiple Strategy Support**
+    * Support configurable rate-limiting algorithms, including Sliding Window Logs, Token Buckets, and Multi-Window limits.
+    * Allow rules, capacities, and time windows to be defined declaratively via external configuration files (YAML/Properties).
+
+* **Local Batch Leasing Strategy**
+    * Acquire and maintain token leases locally in application memory to serve consecutive request checks without hitting the central store on every request.
+    * Dynamically sync unused or consumed lease counts back to Redis upon lease expiration or batch depletion.
+
+* **Bypass & Action Handlers**
+    * Support conditional bypass flag (`rate-limiting.required=false`) to disable rate evaluation completely for specific deployment environments.
+    * Immediately reject non-compliant traffic with HTTP 429 (Too Many Requests) and standardized error headers when limits are exhausted.
+
+---
+
+### Non-Functional Requirements
+
+* **Sub-Millisecond Overhead & High Throughput**
+    * Process rate-check evaluations in under 5 millisecond per request, ensuring zero perceptible degradation to edge gateway latency.
+
+* **Atomicity & Concurrency Control**
+    * Execute state updates within Redis using atomic Lua scripts to eliminate race conditions, phantom tokens, and double-spending across distributed nodes.
+
+* **Network Efficiency**
+    * Minimize remote Redis I/O operations through local token batching, pipelining, and efficient SHA-1 script caching.
+
+* **Resilience & Fault Tolerance**
+    * Include configurable fallback execution policies (e.g., fail-open or fail-closed) in the event of Redis downtime or network degradation to ensure system availability.
+
+* **Horizontal Scalability**
+    * Maintain a completely stateless Java application tier, enabling seamless horizontal auto-scaling across multiple instances against a shared Redis cluster.
+
+---
+
 ## 1. Project Architecture & Applications
 
 The system is composed of two primary microservices alongside backing infrastructure (Kafka, Redis, PostgreSQL, and Mailtrap):
