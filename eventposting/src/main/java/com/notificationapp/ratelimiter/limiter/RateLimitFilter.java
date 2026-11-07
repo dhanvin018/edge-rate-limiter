@@ -26,11 +26,13 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Enumeration;
+import java.util.List;
 
 @Component
 public class RateLimitFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(RateLimitFilter.class);
+    private static final List<String> GATEWAY_IDENTITY_HEADERS = List.of("X-User-Id", "X-User-Tier", "X-Forwarded-For");
 
     @Value("${rate-limiter.fallback-policy:FAIL_CLOSED}")
     private FallbackPolicy fallbackPolicy;
@@ -74,7 +76,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
-        String ipAddress = request.getHeader("X-Forwarded-For");
+        // Trust boundary: only gateway mode (authentication.required=false) may trust identity headers.
+        // Otherwise the IP comes from the socket; set server.forward-headers-strategy behind trusted proxies.
+        String ipAddress = authenticationRequired ? request.getRemoteAddr() : request.getHeader("X-Forwarded-For");
         String authHeader = request.getHeader("Authorization");
         String username = null;
         UserTier userTier = UserTier.FREE;
@@ -99,19 +103,19 @@ public class RateLimitFilter extends OncePerRequestFilter {
             }
         }
 
-        if (username == null) {
-            // ADDED: Read raw user ID from request header
-            username = request.getHeader("X-User-Id");
-        }
+        if (!authenticationRequired) {
+            if (username == null) {
+                username = request.getHeader("X-User-Id");
+            }
 
-        String headerTier = request.getHeader("X-User-Tier");
-        if (headerTier != null && !headerTier.isBlank()) {
-            try {
-                // ADDED: Resolve dynamic user tier from request header
-                userTier = UserTier.valueOf(headerTier.toUpperCase());
-            } catch (IllegalArgumentException e) {
-                log.warn("Unknown X-User-Tier header value '{}'. Defaulting to FREE.", headerTier);
-                userTier = UserTier.FREE;
+            String headerTier = request.getHeader("X-User-Tier");
+            if (headerTier != null && !headerTier.isBlank()) {
+                try {
+                    userTier = UserTier.valueOf(headerTier.toUpperCase());
+                } catch (IllegalArgumentException e) {
+                    log.warn("Unknown X-User-Tier header value '{}'. Defaulting to FREE.", headerTier);
+                    userTier = UserTier.FREE;
+                }
             }
         }
 
@@ -134,6 +138,13 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if(!rateLimitingEnabled){
             log.trace("Rate limiting is disabled by configuration for request to {}", requestUri);
             filterChain.doFilter(request, response);
+            return;
+        }
+
+        // Proxying never reaches Spring Security's authorization filter, so enforce identity here.
+        if (authenticationRequired && !eventPostingEnabled && username == null) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.setHeader(HttpHeaders.WWW_AUTHENTICATE, "Bearer");
             return;
         }
 
@@ -187,13 +198,22 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
     }
 
+    private boolean isForwardable(String headerName) {
+        // Exclude host header to prevent target server routing issues
+        if (headerName.equalsIgnoreCase(HttpHeaders.HOST)) {
+            return false;
+        }
+        // Client-supplied identity headers must not look verified to the downstream service
+        return !authenticationRequired || GATEWAY_IDENTITY_HEADERS.stream().noneMatch(headerName::equalsIgnoreCase);
+    }
+
     private void proxyRequestToExternalUrl(HttpServletRequest request, HttpServletResponse response, String targetUrl) throws IOException {
         // Copy Headers
         HttpHeaders headers = new HttpHeaders();
         Enumeration<String> headerNames = request.getHeaderNames();
         while (headerNames != null && headerNames.hasMoreElements()) {
             String headerName = headerNames.nextElement();
-            if (!headerName.equalsIgnoreCase(HttpHeaders.HOST)) { // Exclude host header to prevent target server routing issues
+            if (isForwardable(headerName)) {
                 headers.addAll(headerName, Collections.list(request.getHeaders(headerName)));
             }
         }
