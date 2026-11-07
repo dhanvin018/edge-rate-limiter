@@ -39,8 +39,9 @@ To solve this, the rate limiter in this architecture is built as a highly custom
 * **Sub-Millisecond Overhead & High Throughput**
     * Process rate-check evaluations in under 5 millisecond per request, ensuring zero perceptible degradation to edge gateway latency.
 
-* **Atomicity & Concurrency Control**
-    * Execute state updates within Redis using atomic Lua scripts to eliminate race conditions, phantom tokens, and double-spending across distributed nodes.
+* **Approximate Limits**
+    * Each Lua script runs atomically in Redis, but checking a limit and recording a request are separate steps. Concurrent requests can therefore briefly exceed a limit, and leased tokens held in an instance's memory add further slack.
+    * Exact enforcement is not a goal. The limiter trades a small, bounded overshoot for fewer Redis round trips and no locking. The size of that overshoot is not yet measured.
 
 * **Network Efficiency**
     * Minimize remote Redis I/O operations through local token batching, pipelining, and efficient SHA-1 script caching.
@@ -49,7 +50,8 @@ To solve this, the rate limiter in this architecture is built as a highly custom
     * Include configurable fallback execution policies (e.g., fail-open or fail-closed) in the event of Redis downtime or network degradation to ensure system availability.
 
 * **Horizontal Scalability**
-    * Maintain a completely stateless Java application tier, enabling seamless horizontal auto-scaling across multiple instances against a shared Redis cluster.
+    * Run multiple application instances against one shared Redis instance. Redis Cluster is not supported, because a request's keys (user, IP and global) live in different hash slots.
+    * Instances keep no state other than leased tokens, which are lost if an instance stops.
 
 ---
 
@@ -105,6 +107,14 @@ When internal authentication is disabled (e.g., offloaded to an upstream API Gat
 * **`X-User-Tier`**: Ingested to determine tier-based rate limit limits (e.g., `free`, `pro`, `enterprise`).
 * **`X-Forwarded-For`**: Ingested to extract the original client IP address (`ipAddress`) for IP-level rate-limiting rules.
 
+These headers are trusted only when `authentication.required=false`. That mode is safe only if:
+
+* The service is reachable only through the gateway.
+* The gateway removes any client-supplied `X-User-Id` and `X-User-Tier`, then sets them from the identity it verified.
+* The gateway overwrites `X-Forwarded-For` with the client IP rather than appending to the client's value. The limiter uses the whole header as the IP key.
+
+When `authentication.required=true`, the service ignores all three headers and removes them before proxying. Identity and tier come only from the JWT, and the client IP comes from the connection. Behind a trusted proxy, set `server.forward-headers-strategy` to resolve the real client IP. In proxy mode, requests without a valid JWT get a `401`.
+
 ---
 
 ## 4. Test Cases, Configurations & Sample Payloads
@@ -133,14 +143,21 @@ Located under [`eventposting/src/test/resources/`](./eventposting/src/test/resou
 
 ### Configure Secret & Application Properties
 
-Before spinning up the containers, configure your application settings in `eventposting/src/main/resources/application.properties` (or via environment variables):
+Secrets come from environment variables, and the services won't start without them. Copy the template and fill in your own values:
 
-**Update application properties**: :
-   ```properties
-   jwt.secret=YOUR_CUSTOM_SECURE_SECRET_KEY_HERE
-   authentication.required=true
-   rate-limiting.required=true
+```bash
+cp .env.example .env
 ```
+
+`JWT_SECRET` must be at least 32 bytes. Never commit `.env`.
+
+Non-secret settings stay in `eventposting/src/main/resources/application.properties`:
+
+```properties
+authentication.required=true
+rate-limiting.required=true
+```
+
 ---
 
 ### Docker Commands

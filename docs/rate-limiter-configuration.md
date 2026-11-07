@@ -6,7 +6,7 @@ For a complete example of the YAML setup, refer to the [Rate Limiter Configurati
 
 ## 1. Global & Fallback Properties
 
-* **`rate-limiter.enabled`** (`boolean`): Enables or disables rate-limiting evaluation globally across the service.
+* **`rate-limiting.required`** (`boolean`, in `application.properties`): Enables or disables rate limiting for the whole service. The `rate-limiter.enabled` key that appears in some test configs is not read.
 * **`rate-limiter.fallback-policy`** (`enum`): Dictates system behavior when backing storage (Redis) is unreachable:
     * `FAIL_CLOSED`: Rejects incoming requests on failure to guarantee downstream protection.
     * `FAIL_OPEN`: Permits incoming requests on failure to prioritize endpoint availability.
@@ -28,7 +28,7 @@ Enforces system-wide traffic thresholds regardless of client identity or IP addr
     * **`local-batch`**: Enables local in-memory token leasing to reduce Redis I/O overhead (applicable to `TOKEN_BUCKET` strategy):
         * **`enabled`**: Toggles local instance batching on/off.
         * **`batch-size`**: Number of tokens requested from Redis in a single lease reservation.
-        * **`refill-threshold`**: Low-token trigger point that prompts the local node to asynchronously re-lease a new token batch.
+        * **`refill-threshold`**: Validated (must be at least 0 and below `batch-size`) but not used. An instance leases a new batch only when its local tokens run out.
 
 ---
 
@@ -42,7 +42,7 @@ Enforces rate limits scoped strictly to individual client IP addresses.
 ### User Identity Dimension (`user:`)
 Enforces tier-based rate limits scoped to authenticated user accounts.
 
-* **`tiers`**: Defines custom rule sets mapped to user tier classifications (e.g., `FREE`, `PRO`, `ENTERPRISE`):
+* **`tiers`**: Defines rule sets per user tier. Valid tiers are `FREE`, `STANDARD`, `PREMIUM` and `INTERNAL`:
     * **`[TIER_NAME].windows`**: Array of time-window rules specifying `size`, `limit`, and `strategy` for that tier level.
 
 ---
