@@ -24,13 +24,13 @@ This project is an event-driven, asynchronous notification system built with Spr
 
 * **AuthenticationService (PostgreSQL)**:
     * Verifies user identity and permissions.
-    * **Configurable**: Can be toggle-disabled in `application.properties:authentication.required` for testing or open environments.
-    * Uses **PostgreSQL** to persist user data, credentials, and access roles.
+    * **Configurable**: Disable with `authentication.required=false` when an upstream gateway authenticates requests. The service then trusts the gateway's identity headers and runs without PostgreSQL.
+    * Uses **PostgreSQL** to persist user data and credentials.
 
 * **RateLimiter (Redis)**:
     * Prevents API abuse and ensures fair resource allocation across clients.
     * **Configurable**: Can be toggle-disabled in `application.properties:rate-limiting.required` for testing or open environments.
-    * Utilizes **Redis** as an in-memory key-value store for high-throughput, low-latency counter management and token bucket tracking.
+    * Utilizes one **Redis** instance, shared by all service instances, for counters and token buckets. Redis Cluster is not supported.
 
 * **EventPostingService Core**:
     * Executes application business logic once authentication and rate-limiting checks pass.

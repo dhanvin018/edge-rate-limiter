@@ -12,18 +12,26 @@ public interface LimitStrategy {
     LimitStrategyType type();
 
     /**
-     * Phase 1: Read-Only Inspection.
-     * Evaluates whether the request fits within capacity using the strategy's read Lua script.
-     * Does NOT mutate Redis state.
+     * Phase 1: Check.
+     * Evaluates whether the request fits within capacity. Most strategies only read Redis here.
+     * A token bucket with local batching reserves tokens in memory, and may lease a batch from Redis.
+     * Any reservation must be undone with {@link #release} if the request is rejected later.
      */
     boolean canConsume(String key, WindowRule rule, int cost, RateLimitStore store);
 
     /**
-     * Phase 2: State Mutation / Batch Commit.
-     * Enqueues the strategy's write Lua script onto an active Redis pipeline connection.
+     * Phase 2: Commit.
+     * Records the request using the strategy's write Lua script.
      * Executed only when ALL evaluated dimensions pass Phase 1.
      */
     void commit(String key, WindowRule rule, int cost, RateLimitStore store);
+
+    /**
+     * Undoes a reservation made by {@link #canConsume} when a later rule or dimension rejects the request.
+     * Strategies that reserve nothing in Phase 1 need no action.
+     */
+    default void release(String key, WindowRule rule, int cost, RateLimitStore store) {
+    }
 
     boolean tryConsume(String key, WindowRule rule, int cost, RateLimitStore store);
     Duration retryAfter(String key, WindowRule rule, RateLimitStore store);

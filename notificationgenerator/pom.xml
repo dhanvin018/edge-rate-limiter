@@ -88,6 +88,16 @@
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<systemPropertyVariables>
+						<SPRING_MAIL_USERNAME>test-only</SPRING_MAIL_USERNAME>
+						<SPRING_MAIL_PASSWORD>test-only</SPRING_MAIL_PASSWORD>
+					</systemPropertyVariables>
+				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-compiler-plugin</artifactId>
 				<executions>
 					<execution>

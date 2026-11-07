@@ -63,6 +63,7 @@ public class DimensionLimiter {
             if (context.cost() > rule.effectiveCapacity()) {
                 log.debug("Request cost ({}) exceeds rule capacity ({}) for rule: {}",
                         context.cost(), rule.effectiveCapacity(), ruleId);
+                release(commitItems);
                 return RateLimitDecision.costExceedsCapacity(ruleId,
                         "Request exceeds maximum allowed batch size (" + rule.effectiveCapacity() + ") for " + dimension.name().toLowerCase() + ".");
             }
@@ -71,6 +72,7 @@ public class DimensionLimiter {
             String key = identity + ":" + rule.strategyType().name() + ":" + rule.windowSize();
 
             if (!strategy.canConsume(key, rule, context.cost(), store)) {
+                release(commitItems);
                 Duration retry = strategy.retryAfter(key, rule, store);
                 log.debug("Rate limit exceeded during inspect for key: {} on rule: {}. Retry after: {}s", key, ruleId, retry.toSeconds());
                 return RateLimitDecision.rateExceeded(ruleId, retry,
@@ -82,6 +84,13 @@ public class DimensionLimiter {
 
         log.debug("Rate limit inspect passed for dimension: {}", dimension);
         return RateLimitDecision.allowed(commitItems);
+    }
+
+    // Returns reservations made by earlier rules in this dimension when a later rule rejects
+    private void release(List<RedisCommitModel> passedRules) {
+        for (RedisCommitModel item : passedRules) {
+            item.strategy().release(item.key(), item.rule(), item.cost(), store);
+        }
     }
 
     private String resolveKey(Dimension dimension, RateLimitContext ctx) {

@@ -2,56 +2,63 @@
 
 This section documents the algorithms supported by the `strategy/` package.
 
+Every request is handled in two phases. **Check** (`canConsume`) decides whether the request fits, and **commit** (`commit`) records it once every dimension has passed. The two phases are separate Redis calls, so concurrent requests can briefly exceed a limit. Limits are approximate by design; see [Approximate Limits](../README.md).
+
 ---
 
 ## 1. Rate Limiting Strategy Implementations
 
 ### `FixedWindowStrategy.java`
-* **Mechanism**: Divides time into fixed, non-overlapping intervals (e.g., 1-minute windows) and tracks request counts within the current window boundary.
-* **Pros**: Incredibly simple, memory-efficient, and fast to execute.
-* **Cons**: Vulnerable to traffic spikes at window boundaries (e.g., sending double the allowed requests right at $t = 0.59s$ and $t = 1.01s$).
+* **Mechanism**: Divides time into fixed, non-overlapping intervals (e.g., 1-minute windows) and counts requests within the current window.
+* **Pros**: Simple, memory-efficient and fast.
+* **Cons**: Allows bursts at window boundaries. A client can send a full window's limit at the end of one window and another full limit at the start of the next.
 
 ---
 
 ### `SlidingWindowLogStrategy.java`
-* **Mechanism**: Stores every request timestamp in a dynamic log (such as a Redis Sorted Set / `ZSET`). When a request arrives, older entries outside the sliding duration are pruned, and the log size is evaluated.
-* **Pros**: Perfectly smooth and exact sliding window evaluation with zero boundary burst vulnerability.
-* **Cons**: High memory consumption and computational overhead for high-throughput endpoints due to storing individual request timestamps.
+* **Mechanism**: Stores every request timestamp in a Redis sorted set (`ZSET`). The check counts entries inside the window, and the commit adds the new entry and prunes old ones.
+* **Pros**: Smooth rolling window with no boundary bursts.
+* **Cons**: Memory and CPU cost grow with request volume, because every request is stored.
 
 ---
 
 ### `SlidingWindowCounterStrategy.java`
-* **Mechanism**: Combines fixed window counters with a weighted calculation based on the previous window's request count. It estimates sliding window throughput using:
-  $$\text{Estimated Count} = \text{Current Window Count} + (\text{Previous Window Count} \times (1 - \text{Overlap Percentage}))$$
-* **Pros**: Low memory footprint (only retains two integers per client context) while eliminating hard boundary bursts.
-* **Cons**: Provides an approximation rather than 100% strict precision.
+* **Mechanism**: Keeps a counter per fixed window and estimates the rolling count by weighting the previous window by how much of it still overlaps:
+  $$\text{Estimated Count} = \lfloor \text{Previous Count} \times \frac{\text{Window} - \text{Elapsed}}{\text{Window}} \rfloor + \text{Current Count}$$
+* **Pros**: Low memory (two integers per key) while smoothing boundary bursts.
+* **Cons**: An approximation, because it assumes requests in the previous window were evenly spread.
 
 ---
 
 ### `TokenBucketStrategy.java`
-* **Mechanism**: Maintains a bucket with a maximum capacity $C$ that refilled at a steady rate $R$ tokens per unit time. Incoming requests consume a set number of tokens.
-* **Pros**: Natural support for traffic bursting while strictly enforcing average rate bounds over longer intervals.
-* **Cons**: Requires frequent atomic state updates (tokens remaining + last refill timestamp) across concurrent execution threads.
+* **Mechanism**: A bucket of capacity $C$ refills at a steady rate $R$ tokens per unit time, and each request consumes tokens. State (`tokens`, `lastRefill`) lives in a Redis hash.
+* **Pros**: Allows short bursts while enforcing an average rate over longer periods.
+* **Cons**: Without local batching, every request needs a Redis check and a Redis commit.
 
 ---
 
-### `LocalTokenBucket.java` & Batch Leasing Architecture
-`LocalTokenBucket.java` works alongside `TokenBucketStrategy.java` to implement a **Local Token Bucket Leasing Scheme**.
-
-Instead of forcing every single incoming HTTP request to make a synchronous network round-trip to Redis to fetch/consume 1 token, instances lease a batch of tokens locally.
+### `LocalTokenBucket.java` & Batch Leasing
+With `local-batch.enabled: true`, an instance leases a batch of tokens from Redis and serves requests from memory until the batch runs out.
 
 #### Execution Flow
-1. **Batch Reservation**: The local application node requests a batch lease (e.g., 50 tokens) from the centralized `RedisRateLimitStore`.
-2. **In-Memory Consumption**: Subsequent HTTP requests on that server instance consume tokens directly from `LocalTokenBucket.java` in local RAM without hitting Redis.
-3. **Re-leasing & Reconciliation**: When the local bucket reaches a lower threshold, it asynchronously requests another batch lease from Redis or returns unused leased tokens upon expiration.
+1. **Reserve locally**: The check atomically takes the request's tokens from the instance's in-memory bucket (a compare-and-set on an `AtomicLong`). Concurrent requests cannot spend the same token.
+2. **Lease when empty**: If the local bucket is short, the check synchronously leases a batch from Redis (`batch-size`, capped at the bucket's capacity) using `token_bucket_write.lua`. Every granted token is kept locally, including partial grants.
+3. **Release on rejection**: If a later rule or dimension rejects the request, the reserved tokens go back to the local bucket.
+4. **Commit**: Nothing to do, because the tokens were reserved during the check.
+
+#### Limitations
+* Leased tokens never expire and are never returned to Redis. An idle instance can hold tokens that other instances cannot use, and can spend them long after they were leased.
+* Leased tokens are lost if an instance stops.
+* The in-memory map holds one bucket per key and is never evicted, so it grows with the number of distinct users and IPs.
+* `refill-threshold` is validated but not used. Leasing happens only when the local bucket is empty.
 
 ---
 
-## 2. Why Local Token Bucket Leasing Beats Fully Centralized Token Buckets
+## 2. Local Leasing vs. a Centralized Token Bucket
 
-| Evaluation Factor | Centralized Redis Token Bucket | Local Token Bucket Leasing (`LocalTokenBucket.java`) |
+| Factor | Centralized Redis Token Bucket | Local Batch Leasing |
 | :--- | :--- | :--- |
-| **Network Overhead** | **1 Request = 1 Redis Round-Trip**. High network I/O and latency amplification under heavy loads. | **1 Redis Round-Trip = $N$ Local Requests**. Drastically reduces network traffic between app nodes and Redis. |
-| **Throughput & Latency** | Limited by network round-trip time (RTT) and Redis single-threaded command processing speed. | **Sub-millisecond latency**. Token checks execute as in-memory memory operations in application RAM. |
-| **Redis Load & Contention** | High key contention under concurrent traffic bursts, increasing Redis CPU usage and lock contention. | **Low contention**. Redis only processes intermittent batch lease operations instead of every micro-transaction. |
-| **Fault Resilience** | If Redis becomes temporarily sluggish or drops network frames, all app request threads freeze. | **Degrades gracefully**. If Redis experiences transient latency, instances continue serving traffic from their local active token lease buffers. |
+| **Redis round trips** | A check and a commit on every request | One lease per batch; requests in between stay in memory |
+| **Latency** | Bound by Redis round-trip time | In-memory for most requests; a request that triggers a lease waits for Redis |
+| **Accuracy** | Limited only by the check/commit gap | Looser: unused leased tokens on other instances add slack, so total admissions can exceed the limit until those tokens are spent |
+| **Redis outage** | Every check fails and the fallback policy applies | Instances keep serving from tokens they already hold, then the fallback policy applies |

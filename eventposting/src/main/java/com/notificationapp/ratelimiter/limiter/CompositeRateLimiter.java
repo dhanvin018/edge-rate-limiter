@@ -26,7 +26,7 @@ public class CompositeRateLimiter implements RateLimiter {
     }
 
     // =========================================================================
-    // PHASE 1: READ-ONLY INSPECTION ACROSS ALL DIMENSIONS
+    // PHASE 1: CHECK ACROSS ALL DIMENSIONS
     // =========================================================================
     @Override
     public RateLimitDecision evaluate(RateLimitContext context) {
@@ -39,7 +39,10 @@ public class CompositeRateLimiter implements RateLimiter {
 
             if (!decision.allowed()) {
                 log.debug("Rate limit exceeded during evaluation for context: {}. Decision: {}", context, decision);
-                // Short-circuit immediately: zero state has been modified in Redis up to this point
+                // Return reservations made by dimensions that already passed
+                for (RedisCommitModel item : aggregatedCommitItems) {
+                    item.strategy().release(item.key(), item.rule(), item.cost(), store);
+                }
                 return decision;
             }
 

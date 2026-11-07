@@ -1,0 +1,18 @@
+rate-limiter:
+  fallback-policy: FAIL_CLOSED
+  global:
+    windows:
+      - size: 1m
+        limit: 5
+        strategy: FIXED_WINDOW
+      - size: 1m
+        limit: 1000
+        strategy: SLIDING_WINDOW_LOG
+      - size: 1m
+        limit: 1000
+        strategy: SLIDING_WINDOW_COUNTER
+      - size: 1m
+        limit: 1000
+        strategy: TOKEN_BUCKET
+        local-batch:
+          enabled: false

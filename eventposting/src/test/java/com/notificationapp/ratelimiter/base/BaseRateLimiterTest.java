@@ -1,5 +1,6 @@
 package com.notificationapp.ratelimiter.base;
 
+import com.notificationapp.eventposting.service.EventPublisherService;
 import org.junit.jupiter.api.BeforeEach;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,6 +10,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.io.IOException;
 import java.net.URI;
@@ -24,7 +26,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = "event.posting.enabled=true"
+)
 public abstract class BaseRateLimiterTest {
 
     protected static final Logger log = LoggerFactory.getLogger(BaseRateLimiterTest.class);
@@ -32,6 +37,10 @@ public abstract class BaseRateLimiterTest {
     protected static final String API_ENDPOINT = "/api/events/postEvent";
     @LocalServerPort
     protected int port;
+
+    // These suites test the limiter, so requests stop at the controller instead of needing Kafka
+    @MockitoBean
+    private EventPublisherService eventPublisherService;
 
     @Autowired
     private StringRedisTemplate redisTemplate;

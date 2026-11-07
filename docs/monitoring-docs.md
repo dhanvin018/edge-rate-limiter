@@ -33,9 +33,20 @@ Monitoring is a critical pillar of modern software engineering and system archit
 
 Through **Micrometer** (the default metrics facade in Spring Boot), Actuator translates application runtime data into the exact format that monitoring engines like Prometheus understand.
 
+### Endpoints in This Project
+
+Both services expose only `health`, `info`, `prometheus` and `configprops`. `configprops` hides property values (`show-values=NEVER`). Actuator requests skip the rate limiter.
+
+| Service | Host port | Container port | Prometheus target |
+| :--- | :--- | :--- | :--- |
+| `eventposting` | `8081` | `8085` (`server.port`) | `eventposting:8085` |
+| `notification-generator` | `8082` | `8086` (`management.server.port`) | `notification-generator:8086` |
+
+No Grafana dashboards are provisioned yet; only the Prometheus data source is.
+
 ### Key Actuator Endpoints
 
-By default, Actuator endpoints are hosted under the `/actuator` path:
+By default, Actuator endpoints are hosted under the `/actuator` path. Endpoints other than those listed above are not exposed in this project:
 
 * **`/actuator/prometheus`**
     * **Role:** Formats and exposes application metrics in plain-text dimensional format required by Prometheus scrape jobs.

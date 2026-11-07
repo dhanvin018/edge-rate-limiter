@@ -8,7 +8,7 @@ import org.springframework.stereotype.Repository;
 import java.util.Optional;
 
 @Repository
-@ConditionalOnProperty(name = "authentication.required", havingValue = "true")
+@ConditionalOnProperty(name = "authentication.required", havingValue = "true", matchIfMissing = true)
 public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByUsername(String username);
     boolean existsByUsername(String username);

@@ -10,14 +10,11 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.RedisSystemException;
-import org.springframework.data.redis.connection.RedisConnection;
-import org.springframework.data.redis.connection.ReturnType;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Collections;
@@ -111,18 +108,12 @@ public class RedisRateLimitStore implements RateLimitStore {
 
     @Override
     public void commitFixedWindowToPipeline(String windowKey, int cost, long windowSizeMs) {
-
-        redisTemplate.execute((RedisCallback<Object>) connection -> {
-            connection.evalSha(
-                    fixedWindowWriteScript.getSha1(),
-                    ReturnType.INTEGER,
-                    1,
-                    windowKey.getBytes(StandardCharsets.UTF_8),
-                    String.valueOf(cost).getBytes(StandardCharsets.UTF_8),
-                    String.valueOf(windowSizeMs).getBytes(StandardCharsets.UTF_8)
-            );
-            return null;
-        });
+        redisTemplate.execute(
+                fixedWindowWriteScript,
+                Collections.singletonList(windowKey),
+                String.valueOf(cost),
+                String.valueOf(windowSizeMs)
+        );
     }
 
     @Override
@@ -161,17 +152,12 @@ public class RedisRateLimitStore implements RateLimitStore {
 
     @Override
     public void commitSlidingWindowCounterToPipeline(String currentKey, int cost, long windowMs) {
-        redisTemplate.execute((RedisCallback<Object>) connection -> {
-            connection.evalSha(
-                    slidingWindowCounterWriteScript.getSha1(),
-                    ReturnType.INTEGER,
-                    1,
-                    currentKey.getBytes(StandardCharsets.UTF_8),
-                    String.valueOf(cost).getBytes(StandardCharsets.UTF_8),
-                    String.valueOf(windowMs).getBytes(StandardCharsets.UTF_8)
-            );
-            return null;
-        });
+        redisTemplate.execute(
+                slidingWindowCounterWriteScript,
+                Collections.singletonList(currentKey),
+                String.valueOf(cost),
+                String.valueOf(windowMs)
+        );
     }
 
     @Override
@@ -209,19 +195,13 @@ public class RedisRateLimitStore implements RateLimitStore {
 
     @Override
     public void commitSlidingWindowLogToPipeline(String key, long windowMs, long now, String uniqueMemberId) {
-        // Active pipeline execution during executePipeline pass
-        redisTemplate.execute((RedisCallback<Object>) connection -> {
-            connection.evalSha(
-                    slidingWindowLogWriteScript.getSha1(),
-                    ReturnType.INTEGER,
-                    1,
-                    key.getBytes(StandardCharsets.UTF_8),
-                    String.valueOf(windowMs).getBytes(StandardCharsets.UTF_8),
-                    String.valueOf(now).getBytes(StandardCharsets.UTF_8),
-                    uniqueMemberId.getBytes(StandardCharsets.UTF_8)
-            );
-            return null;
-        });
+        redisTemplate.execute(
+                slidingWindowLogWriteScript,
+                Collections.singletonList(key),
+                String.valueOf(windowMs),
+                String.valueOf(now),
+                uniqueMemberId
+        );
     }
 
     @Override
@@ -305,19 +285,14 @@ public class RedisRateLimitStore implements RateLimitStore {
 
     @Override
     public void commitTokenBucketToPipeline(String key, long capacity, double refillRatePerMs, int cost, long now) {
-        redisTemplate.execute((RedisCallback<Object>) connection -> {
-            connection.evalSha(
-                    tokenBucketWriteScript.getSha1(),
-                    ReturnType.INTEGER,
-                    1,
-                    key.getBytes(StandardCharsets.UTF_8),                            // KEYS[1]
-                    String.valueOf(capacity).getBytes(StandardCharsets.UTF_8),       // ARGV[1]
-                    String.valueOf(refillRatePerMs).getBytes(StandardCharsets.UTF_8), // ARGV[2]
-                    String.valueOf(cost).getBytes(StandardCharsets.UTF_8),           // ARGV[3]
-                    String.valueOf(now).getBytes(StandardCharsets.UTF_8)            // ARGV[4]
-            );
-            return null;
-        });
+        redisTemplate.execute(
+                tokenBucketWriteScript,
+                Collections.singletonList(key),
+                String.valueOf(capacity),
+                String.valueOf(refillRatePerMs),
+                String.valueOf(cost),
+                String.valueOf(now)
+        );
     }
 
     /**
