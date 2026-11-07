@@ -49,14 +49,14 @@ public class TokenBucketStrategy implements LimitStrategy {
                 k -> new LocalTokenBucket(capacity, refillRatePerMs)
         );
 
-        // 1. Check local inventory cache first
-        if (localBucket.hasSufficientTokens(cost)) {
-            log.trace("Phase 1: Local inventory sufficient ({}) for cost={} on key={}",
-                    localBucket.availableTokens(), cost, key);
+        // 1. Reserve from local inventory. Consuming atomically here, rather than peeking,
+        //    stops concurrent requests from all passing on the same last token.
+        if (localBucket.tryConsumeLocal(cost)) {
+            log.trace("Phase 1: Reserved {} token(s) from local inventory for key={}", cost, key);
             return true;
         }
 
-        // 2. Local inventory depleted -> Lease a full token batch from Redis once via Store
+        // 2. Local inventory depleted -> Lease a token batch from Redis
         int configuredBatchSize = localBatch.batchSize();
         int batchToRequest = (int) Math.min(capacity, Math.max(cost, configuredBatchSize));
 
@@ -64,15 +64,31 @@ public class TokenBucketStrategy implements LimitStrategy {
 
         long granted = store.leaseTokenBucket(key, capacity, refillRatePerMs, batchToRequest);
 
-        if (granted >= cost) {
-            // Immediately stock local memory inventory with the newly leased batch
+        // Keep every granted token, even a partial grant, so leased tokens are never lost
+        if (granted > 0) {
             localBucket.depositLeasedTokens(granted);
-            log.debug("Phase 1: Successfully stocked local inventory with {} tokens for key={}", granted, key);
+        }
+
+        if (localBucket.tryConsumeLocal(cost)) {
+            log.debug("Phase 1: Leased {} token(s) and reserved {} for key={}", granted, cost, key);
             return true;
         }
 
         log.debug("Phase 1: Redis rate limit exceeded for key={}. Granted {} token(s), required cost={}", key, granted, cost);
         return false;
+    }
+
+    @Override
+    public void release(String key, WindowRule rule, int cost, RateLimitStore store) {
+        LocalBatchConfig localBatch = rule.localBatch();
+        if (localBatch == null || !localBatch.enabled()) {
+            return; // Non-batched checks reserve nothing
+        }
+        LocalTokenBucket localBucket = localBuckets.get(key);
+        if (localBucket != null) {
+            localBucket.depositLeasedTokens(cost);
+            log.trace("Released {} reserved token(s) back to local inventory for key={}", cost, key);
+        }
     }
 
     @Override
@@ -89,13 +105,8 @@ public class TokenBucketStrategy implements LimitStrategy {
             return;
         }
 
-        // CASE 2: Local Batching Enabled -> Deduct from memory inventory (0 Redis network calls!)
-        LocalTokenBucket localBucket = localBuckets.get(key);
-        if (localBucket != null) {
-            boolean consumed = localBucket.tryConsumeLocal(cost);
-            log.trace("Phase 2 Commit: Consumed {} token(s) locally from memory for key={}. Success={}",
-                    cost, key, consumed);
-        }
+        // CASE 2: Local Batching Enabled -> Nothing to do: canConsume already reserved the tokens
+        log.trace("Phase 2 Commit: {} token(s) for key={} were reserved locally during Phase 1", cost, key);
     }
 
     @Override
