@@ -69,9 +69,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
         String requestUri = request.getRequestURI();
 
-        // Skip auth/rate-limiting endpoints
-        if (requestUri.startsWith("/api/v1/auth")) {
-            log.debug("Bypassing RateLimitFilter for authentication endpoint: {}", requestUri);
+        // Skip auth endpoints, and actuator so metric scrapes don't use up limits or get proxied
+        if (requestUri.startsWith("/api/v1/auth") || requestUri.startsWith("/actuator/")) {
+            log.debug("Bypassing RateLimitFilter for endpoint: {}", requestUri);
             filterChain.doFilter(request, response);
             return;
         }

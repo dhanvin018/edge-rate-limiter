@@ -181,6 +181,21 @@ class RateLimitFilterTrustBoundaryTest {
         downstream.verify();
     }
 
+    @Test
+    @DisplayName("Actuator requests skip the limiter and are never proxied")
+    void actuatorSkipsLimiterAndProxy() throws Exception {
+        RateLimitFilter filter = filter(false, false);
+        MockRestServiceServer downstream = downstreamOf(filter);
+        MockHttpServletRequest request = new MockHttpServletRequest(HttpMethod.GET.name(), "/actuator/prometheus");
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, new MockHttpServletResponse(), chain);
+
+        assertThat(chain.getRequest()).isNotNull();
+        verify(rateLimiter, never()).evaluate(any());
+        downstream.verify();
+    }
+
     private RateLimitContext runThroughChain(RateLimitFilter filter, MockHttpServletRequest request) throws Exception {
         MockFilterChain chain = new MockFilterChain();
 

@@ -6,11 +6,11 @@ scrape_configs:
   - job_name: 'event-posting-service'
     metrics_path: '/actuator/prometheus'
     static_configs:
-      - targets: ['event-posting-service:8080'] # Refers to the service name in docker-compose - event-posting-service
+      - targets: ['eventposting:8085'] # Compose service name and server.port
   - job_name: 'notification-generator'
     metrics_path: '/actuator/prometheus'
     static_configs:
-      - targets: [ 'notification-generator:8080' ]
+      - targets: [ 'notification-generator:8086' ] # management.server.port
   # --- Community Exporters ---
   - job_name: 'redis'
     static_configs:
